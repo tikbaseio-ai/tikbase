@@ -4,15 +4,32 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { BookmarkProvider } from "@/lib/bookmarks";
+import AppSidebar from "@/components/AppSidebar";
+import VideosPage from "@/pages/videos";
+import ProductsPage from "@/pages/products";
+import SavedPage from "@/pages/saved";
+import PlansPage from "@/pages/plans";
+import BillingPage from "@/pages/billing";
+import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 
 function AppRouter() {
   return (
-    <Switch>
-      {/* Register a <Route path="..." component={...} /> for EVERY page linked in your sidebar/nav. Missing routes cause 404. */}
-      {/* <Route path="/" component={Home}/> */}
-      <Route component={NotFound} />
-    </Switch>
+    <div className="flex min-h-screen" style={{ backgroundColor: '#0a0a0c' }}>
+      <AppSidebar />
+      <main className="flex-1 ml-[220px] min-h-screen">
+        <Switch>
+          <Route path="/" component={VideosPage} />
+          <Route path="/products" component={ProductsPage} />
+          <Route path="/saved" component={SavedPage} />
+          <Route path="/plans" component={PlansPage} />
+          <Route path="/billing" component={BillingPage} />
+          <Route path="/settings" component={SettingsPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </main>
+    </div>
   );
 }
 
@@ -20,10 +37,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Router hook={useHashLocation}>
-          <AppRouter />
-        </Router>
+        <BookmarkProvider>
+          <Toaster />
+          <Router hook={useHashLocation}>
+            <AppRouter />
+          </Router>
+        </BookmarkProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

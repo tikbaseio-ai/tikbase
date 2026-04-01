@@ -14,7 +14,8 @@ import { Bookmark, ExternalLink, Eye, ShoppingBag, ChevronLeft, ChevronRight, Lo
 
 export default function VideosPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
-  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]); // Default to 1 Month
+  // Default to 2 Weeks always, upgrade to 1 Month once we confirm paid status
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[1]); // "2 Weeks"
   const [videos, setVideos] = useState<VideoWithProduct[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -76,25 +77,34 @@ export default function VideosPage() {
 
         {/* Timeframe pills */}
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
-          {TIMEFRAMES.map(tf => (
-            <button
-              key={tf.label}
-              onClick={() => setTimeframe(tf)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                timeframe.label === tf.label
-                  ? 'text-[#0a0a0c]'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              style={
-                timeframe.label === tf.label
-                  ? { backgroundColor: '#a3ff00' }
-                  : undefined
-              }
-              data-testid={`timeframe-${tf.days}`}
-            >
-              {tf.label}
-            </button>
-          ))}
+          {TIMEFRAMES.map(tf => {
+            const isLocked = !isPaid && tf.label !== '2 Weeks';
+            return (
+              <button
+                key={tf.label}
+                onClick={() => {
+                  if (isLocked) { showPaywall('timeframe'); return; }
+                  setTimeframe(tf);
+                }}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  timeframe.label === tf.label
+                    ? 'text-[#0a0a0c]'
+                    : isLocked
+                      ? 'text-zinc-600'
+                      : 'text-muted-foreground hover:text-foreground'
+                }`}
+                style={
+                  timeframe.label === tf.label
+                    ? { backgroundColor: '#a3ff00' }
+                    : undefined
+                }
+                data-testid={`timeframe-${tf.days}`}
+              >
+                {tf.label}
+                {isLocked && <Lock size={8} className="inline ml-1 opacity-50" />}
+              </button>
+            );
+          })}
         </div>
 
         {/* Result count */}

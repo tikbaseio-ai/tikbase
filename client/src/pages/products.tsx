@@ -49,8 +49,8 @@ function formatRevenue(n: number): string {
 export default function ProductsPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
   const { isPaid, showPaywall } = useSubscription();
-  // Free users default to "2 Weeks" (index 1), paid users to "1 Month" (index 2)
-  const [timeframe, setTimeframe] = useState(TIMEFRAMES[isPaid ? 2 : 1]);
+  // Default to 2 Weeks always, upgrade to 1 Month once we confirm paid status
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[1]); // "2 Weeks"
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [allVideos, setAllVideos] = useState<Record<string, ProductVideo[]>>({});
   const [snapshotMap, setSnapshotMap] = useState<Record<string, SnapshotData[]>>({});

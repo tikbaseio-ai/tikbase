@@ -191,9 +191,20 @@ export default function ProductsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
-        <select value={niche} onChange={e => setNiche(e.target.value)}
+        <select value={niche} onChange={e => {
+            if (!isPaid && e.target.value !== 'all') {
+              e.target.value = 'all';
+              showPaywall('category_filter');
+              return;
+            }
+            setNiche(e.target.value);
+          }}
           className="h-9 px-3 rounded-md text-sm font-medium border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
-          {NICHES.map(n => <option key={n.slug} value={n.slug}>{n.label}</option>)}
+          {NICHES.map(n => (
+            <option key={n.slug} value={n.slug} disabled={!isPaid && n.slug !== 'all'}>
+              {n.label}{!isPaid && n.slug !== 'all' ? ' 🔒' : ''}
+            </option>
+          ))}
         </select>
 
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">

@@ -67,13 +67,20 @@ export default function VideosPage() {
         {/* Niche dropdown */}
         <select
           value={niche}
-          onChange={e => setNiche(e.target.value)}
+          onChange={e => {
+            if (!isPaid && e.target.value !== 'all') {
+              e.target.value = 'all';
+              showPaywall('category_filter');
+              return;
+            }
+            setNiche(e.target.value);
+          }}
           className="h-9 px-3 rounded-md text-sm font-medium border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
           data-testid="niche-filter"
         >
           {NICHES.map(n => (
-            <option key={n.slug} value={n.slug}>
-              {n.label}
+            <option key={n.slug} value={n.slug} disabled={!isPaid && n.slug !== 'all'}>
+              {n.label}{!isPaid && n.slug !== 'all' ? ' 🔒' : ''}
             </option>
           ))}
         </select>

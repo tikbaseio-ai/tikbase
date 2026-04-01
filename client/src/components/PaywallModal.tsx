@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useSubscription } from '@/hooks/use-subscription';
-import { X, Lock, TrendingUp, BarChart3, Zap } from 'lucide-react';
+import { X, Lock, TrendingUp, BarChart3, Zap, Tag } from 'lucide-react';
 
 const STRIPE_LINKS = {
   monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
@@ -16,12 +17,17 @@ const FEATURE_MESSAGES: Record<string, string> = {
   default: 'Unlock full access to TikBase analytics',
 };
 
-function handleCheckout(plan: 'monthly' | 'annual') {
-  window.open(STRIPE_LINKS[plan], '_blank', 'noopener,noreferrer');
-}
-
 export function PaywallModal() {
   const { paywallVisible, paywallFeature, closePaywall } = useSubscription();
+  const [promoCode, setPromoCode] = useState('');
+
+  function handleCheckout(plan: 'monthly' | 'annual') {
+    let link = STRIPE_LINKS[plan];
+    if (promoCode.trim()) {
+      link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
+    }
+    window.open(link, '_blank', 'noopener,noreferrer');
+  }
 
   if (!paywallVisible) return null;
 
@@ -63,6 +69,20 @@ export function PaywallModal() {
           <div className="flex items-center gap-3 text-sm text-foreground">
             <Zap size={16} className="text-[#a3ff00] flex-shrink-0" />
             <span>Full product &amp; video analytics</span>
+          </div>
+        </div>
+
+        {/* Discount code */}
+        <div className="mb-4">
+          <div className="relative">
+            <Tag size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              type="text"
+              value={promoCode}
+              onChange={e => setPromoCode(e.target.value)}
+              placeholder="Discount code"
+              className="w-full h-10 pl-9 pr-3 rounded-lg text-sm border border-zinc-800 bg-zinc-900/50 text-foreground placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-[#a3ff00]/50 focus:border-[#a3ff00]/50"
+            />
           </div>
         </div>
 

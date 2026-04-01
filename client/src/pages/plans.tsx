@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, X, Tag } from 'lucide-react';
 
 const STRIPE_LINKS = {
   monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
@@ -21,13 +21,17 @@ const FEATURES = [
 
 export default function PlansPage() {
   const [annual, setAnnual] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
   const monthlyPrice = 44.99;
   const annualPrice = 31.49;
   const currentPrice = annual ? annualPrice : monthlyPrice;
   const savingsPercent = 30;
 
   function handleUpgrade() {
-    const link = annual ? STRIPE_LINKS.annual : STRIPE_LINKS.monthly;
+    let link = annual ? STRIPE_LINKS.annual : STRIPE_LINKS.monthly;
+    if (promoCode.trim()) {
+      link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
+    }
     window.open(link, '_blank', 'noopener,noreferrer');
   }
 
@@ -133,6 +137,23 @@ export default function PlansPage() {
             </p>
           )}
           {!annual && <div className="mb-4" />}
+          {/* Discount code input */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Tag size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={promoCode}
+                  onChange={e => setPromoCode(e.target.value)}
+                  placeholder="Discount code"
+                  className="w-full h-10 pl-9 pr-3 rounded-md text-sm border border-border bg-zinc-900/50 text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-[#a3ff00]/50 focus:border-[#a3ff00]/50"
+                  data-testid="promo-code-input"
+                />
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={handleUpgrade}
             className="w-full h-10 rounded-md text-sm font-bold transition-colors mb-6"

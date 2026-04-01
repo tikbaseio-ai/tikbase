@@ -236,6 +236,44 @@ export async function fetchTopVideos(
     }
   }
 
+  // For products with sold_count = 0, estimate sales from stock_quantity deltas in snapshots
+  const zeroSoldProductIds = videoProductIds.filter(
+    (id: string) => productsMap[id] && productsMap[id].sold_count === 0
+  );
+
+  if (zeroSoldProductIds.length > 0) {
+    for (let i = 0; i < zeroSoldProductIds.length; i += batchSize) {
+      const batch = zeroSoldProductIds.slice(i, i + batchSize);
+      const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
+      const { data: snaps } = await query('product_snapshots', {
+        select: 'product_id,stock_quantity,snapshot_date',
+        product_id: `in.${inList}`,
+        order: 'snapshot_date.asc',
+        limit: '5000',
+      });
+      if (snaps) {
+        // Group snapshots by product_id
+        const snapsByProduct: Record<string, any[]> = {};
+        for (const s of snaps) {
+          if (!snapsByProduct[s.product_id]) snapsByProduct[s.product_id] = [];
+          snapsByProduct[s.product_id].push(s);
+        }
+        // Calculate estimated sold from stock drops
+        for (const [pid, productSnaps] of Object.entries(snapsByProduct)) {
+          if (productSnaps.length >= 2) {
+            const sorted = productSnaps.sort((a: any, b: any) => a.snapshot_date.localeCompare(b.snapshot_date));
+            const firstStock = sorted[0].stock_quantity || 0;
+            const lastStock = sorted[sorted.length - 1].stock_quantity || 0;
+            const estimatedSold = Math.max(0, firstStock - lastStock);
+            if (estimatedSold > 0 && productsMap[pid]) {
+              productsMap[pid] = { ...productsMap[pid], sold_count: estimatedSold };
+            }
+          }
+        }
+      }
+    }
+  }
+
   const videosWithProducts: VideoWithProduct[] = pageVideos
     .map((v: any) => {
       const product = productsMap[v.product_id];

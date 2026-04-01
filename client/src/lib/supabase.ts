@@ -239,11 +239,8 @@ export async function fetchTopVideos(
   const videosWithProducts: VideoWithProduct[] = pageVideos
     .map((v: any) => {
       const product = productsMap[v.product_id];
-      // Filter out placeholder/category-level products that aren't real
-      const isPlaceholder = product && (
-        (product.title && product.title.includes('Discovered Videos')) ||
-        (product.sold_count === 0 && product.review_count === 0 && product.rating === 0)
-      );
+      // Filter out placeholder/category-level products (e.g. "Discovered Videos")
+      const isPlaceholder = product && product.title && product.title.includes('Discovered Videos');
       return {
         ...v,
         product: isPlaceholder ? undefined : product,

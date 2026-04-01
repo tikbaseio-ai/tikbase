@@ -315,9 +315,11 @@ export default function VideosPage() {
                             <p className="text-xs text-foreground font-medium leading-snug line-clamp-2">
                               {video.product.title}
                             </p>
-                            <span className="inline-block mt-1 text-[10px] font-mono font-semibold text-[#a3ff00] bg-[#a3ff00]/10 px-1.5 py-0.5 rounded">
-                              {(video.product.sold_count || 0).toLocaleString()} sold
-                            </span>
+                            {video.product.sold_count > 0 && (
+                              <span className="inline-block mt-1 text-[10px] font-mono font-semibold text-[#a3ff00] bg-[#a3ff00]/10 px-1.5 py-0.5 rounded">
+                                {video.product.sold_count.toLocaleString()} sold
+                              </span>
+                            )}
                           </div>
                         </div>
                         {video.product.product_url && (

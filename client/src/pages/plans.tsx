@@ -151,6 +151,20 @@ export default function PlansPage() {
           </ul>
         </div>
       </div>
+
+      {/* Manage existing subscription */}
+      <div className="mt-6 text-center">
+        <a
+          href="#/billing"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors no-underline"
+          onClick={(e) => {
+            e.preventDefault();
+            window.location.hash = '#/billing';
+          }}
+        >
+          Already subscribed? <span className="text-[#a3ff00] font-medium">Manage your subscription</span>
+        </a>
+      </div>
     </div>
   );
 }

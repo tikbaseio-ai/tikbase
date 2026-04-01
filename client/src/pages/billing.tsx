@@ -1,6 +1,37 @@
-import { CreditCard, Receipt } from 'lucide-react';
+import { useState } from 'react';
+import { CreditCard, Receipt, Settings, Loader2 } from 'lucide-react';
 
 export default function BillingPage() {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleManageSubscription() {
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/create-portal-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong');
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError('Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-3xl" data-testid="billing-page">
       <div className="mb-6">
@@ -36,6 +67,40 @@ export default function BillingPage() {
         >
           View Plans
         </a>
+      </div>
+
+      {/* Manage Subscription */}
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Settings size={16} className="text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">Manage Subscription</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Enter the email you used to subscribe to manage your plan, update payment methods, or cancel.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setError(''); }}
+            className="flex-1 h-9 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[#a3ff00]/50"
+            data-testid="portal-email-input"
+          />
+          <button
+            onClick={handleManageSubscription}
+            disabled={loading}
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-md text-xs font-bold transition-colors disabled:opacity-50"
+            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            data-testid="btn-manage-subscription"
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            Manage Subscription
+          </button>
+        </div>
+        {error && (
+          <p className="text-sm text-red-400 mt-2" data-testid="portal-error">{error}</p>
+        )}
       </div>
 
       {/* Payment Method */}

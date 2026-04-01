@@ -150,20 +150,34 @@ export default function VideosPage() {
                 >
                   {/* Thumbnail */}
                   <div className="relative aspect-[9/16] max-h-[280px] overflow-hidden bg-muted">
-                    {video.cover_image_url ? (
-                      <img
-                        src={video.cover_image_url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const fallback = target.nextElementSibling as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
+                    {(() => {
+                      // Try oEmbed thumbnail as a more reliable fallback
+                      const videoId = video.video_url?.match(/video\/(\d+)/)?.[1];
+                      const oembedThumb = videoId ? `https://www.tiktok.com/oembed?url=https://www.tiktok.com/@t/video/${videoId}` : null;
+                      return video.cover_image_url ? (
+                        <img
+                          src={video.cover_image_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            // On CDN failure, try fetching a fresh URL from oEmbed
+                            if (oembedThumb && !target.dataset.retried) {
+                              target.dataset.retried = '1';
+                              fetch(oembedThumb).then(r => r.json()).then(d => {
+                                if (d.thumbnail_url) { target.src = d.thumbnail_url; }
+                                else { target.style.display = 'none'; const fb = target.nextElementSibling as HTMLElement; if (fb) fb.style.display = 'flex'; }
+                              }).catch(() => { target.style.display = 'none'; const fb = target.nextElementSibling as HTMLElement; if (fb) fb.style.display = 'flex'; });
+                            } else {
+                              target.style.display = 'none';
+                              const fallback = target.nextElementSibling as HTMLElement;
+                              if (fallback) fallback.style.display = 'flex';
+                            }
+                          }}
+                        />
+                      ) : null;
+                    })()}
                     <div
                       className="w-full h-full items-center justify-center bg-gradient-to-b from-zinc-800 to-zinc-900"
                       style={{ display: video.cover_image_url ? 'none' : 'flex' }}

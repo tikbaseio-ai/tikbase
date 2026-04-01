@@ -8,6 +8,7 @@ const STRIPE_PRICES = {
 };
 
 const FEATURE_MESSAGES: Record<string, string> = {
+  top_videos: 'Unlock the top 100 trending TikTok Shop videos — see what\'s going viral right now',
   videos_101: 'Unlock access to all trending videos beyond the top 100',
   timeframe: "Unlock all timeframes to see what's trending this week, month, and year",
   product_detail: 'Unlock detailed product analytics and insights',

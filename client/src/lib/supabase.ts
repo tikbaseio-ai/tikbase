@@ -213,21 +213,14 @@ export async function fetchTopVideos(
   // Step 5: Filter by actual TikTok post date
   let filteredVideos = annotated.filter((v: any) => v._postDate >= cutoffDate);
 
-  // Minimum video counts per timeframe:
-  // 1 week: 50, 2 weeks: 100, 1 month+: 200
-  const minCounts: Record<number, number> = { 7: 50, 14: 100, 30: 200, 90: 200, 180: 200, 365: 200 };
-  const minCount = minCounts[days] || 50;
-
-  // If we don't have enough, progressively expand the window
-  if (filteredVideos.length < minCount) {
-    // Sort ALL videos by post date (most recent first), take the top N
-    const byRecency = [...annotated].sort((a: any, b: any) => 
+  // If too few recent videos, show all videos sorted by most recent first
+  if (filteredVideos.length < 50) {
+    filteredVideos = [...annotated].sort((a: any, b: any) => 
       (b._postDate?.getTime() || 0) - (a._postDate?.getTime() || 0)
     );
-    filteredVideos = byRecency.slice(0, Math.max(minCount, filteredVideos.length));
   }
 
-  // Sort by view_count desc and paginate
+  // Sort by view_count desc — return ALL, let frontend handle pagination
   filteredVideos.sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
   const total = filteredVideos.length;
   const pageVideos = filteredVideos.slice(offset, offset + limit);

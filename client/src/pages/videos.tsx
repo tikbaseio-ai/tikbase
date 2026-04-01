@@ -26,12 +26,12 @@ export default function VideosPage() {
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
 
-  // Free users start at page 3 (rank 101+) — top 100 is premium content
-  const freeStartPage = 3;
+  // Lock top 50% of videos for free users (minimum 10)
+  const paywallCutoff = isPaid ? 0 : Math.max(10, Math.ceil(total * 0.5));
 
   useEffect(() => {
-    setPage(isPaid ? 1 : freeStartPage);
-  }, [niche, timeframe, isPaid]);
+    setPage(1);
+  }, [niche, timeframe]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,24 +151,25 @@ export default function VideosPage() {
             {videos.map((video, idx) => {
               const rank = (page - 1) * limit + idx + 1;
               const bookmarked = isVideoBookmarked(video.id);
-              const isLocked = !isPaid && rank <= 100;
+              const isLocked = rank <= paywallCutoff;
 
               if (isLocked) {
                 return (
-                  <div key={video.id} className="relative rounded-lg border border-border bg-card overflow-hidden">
+                  <div key={video.id} className="relative rounded-lg border border-border bg-card overflow-hidden cursor-pointer"
+                    onClick={() => showPaywall('top_videos')}>
                     <div className="aspect-[9/16] max-h-[280px] overflow-hidden bg-muted">
-                      {video.cover_image_url && <img src={video.cover_image_url} alt="" className="w-full h-full object-cover blur-sm opacity-40" loading="lazy" />}
+                      {video.cover_image_url && <img src={video.cover_image_url} alt="" className="w-full h-full object-cover blur-md opacity-40" loading="lazy" />}
                       {!video.cover_image_url && <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />}
                     </div>
-                    <div className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={() => showPaywall('top_videos')}>
+                    <div className="absolute inset-0 flex items-center justify-center">
                       <div className="text-center">
-                        <div className="w-12 h-12 rounded-full bg-[#a3ff00]/10 flex items-center justify-center mx-auto mb-2">
-                          <Lock size={20} className="text-[#a3ff00]" />
-                        </div>
-                        <span className="text-xs font-medium text-white">Top 100 — Upgrade to unlock</span>
+                        <Lock size={20} className="text-[#a3ff00] mx-auto mb-1" />
+                        <span className="text-[11px] font-medium text-white">Upgrade to unlock</span>
                       </div>
                     </div>
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded font-mono text-xs font-bold bg-zinc-700 text-zinc-400">#{rank}</div>
+                    <div className="absolute top-2 left-2 z-20">
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white">#{rank}</span>
+                    </div>
                   </div>
                 );
               }
@@ -343,13 +344,8 @@ export default function VideosPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-8 mb-4">
               <button
-                onClick={() => {
-                  const prevPage = page - 1;
-                  // Block free users from going to pages showing ranks 1-100
-                  if (!isPaid && prevPage >= 1 && prevPage <= 2) { showPaywall('top_videos'); return; }
-                  setPage(p => Math.max(1, p - 1));
-                }}
-                disabled={page === 1 || (!isPaid && page <= freeStartPage)}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
                 className="h-9 w-9 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-30 disabled:pointer-events-none transition-colors"
                 data-testid="page-prev"
               >

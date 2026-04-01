@@ -77,6 +77,7 @@ export interface VideoWithProduct extends ProductVideo {
 }
 
 export const NICHES = [
+  { slug: 'all', label: 'All Categories' },
   { slug: 'beauty-skincare', label: 'Beauty & Skincare' },
   { slug: 'gym-fitness', label: 'Gym & Fitness' },
   { slug: 'health-wellness', label: 'Health & Wellness' },
@@ -85,6 +86,9 @@ export const NICHES = [
   { slug: 'tech-gadgets', label: 'Tech Gadgets' },
   { slug: 'pet-products', label: 'Pet Products' },
 ];
+
+// Niches without the 'all' option (for Videos page which doesn't support all)
+export const NICHES_NO_ALL = NICHES.filter(n => n.slug !== 'all');
 
 export const TIMEFRAMES = [
   { label: '1 Week', days: 7 },
@@ -99,6 +103,22 @@ export function getCutoffDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString();
+}
+
+// Extract actual TikTok post date from video URL using snowflake ID
+export function extractPostDate(videoUrl: string): Date | null {
+  if (!videoUrl) return null;
+  const match = videoUrl.match(/video\/(\d+)/);
+  if (!match) return null;
+  try {
+    const videoId = BigInt(match[1]);
+    const timestamp = Number(videoId >> 32n);
+    const date = new Date(timestamp * 1000);
+    if (date.getFullYear() < 2020 || date.getFullYear() > 2027) return null;
+    return date;
+  } catch {
+    return null;
+  }
 }
 
 export function formatViews(n: number): string {
@@ -130,29 +150,33 @@ export function timeAgo(dateStr: string): string {
   return `${diffMonths}mo ago`;
 }
 
-// Fetch top videos for a niche with timeframe filter
+// Fetch top videos for a niche, filtered by ACTUAL TikTok post date.
+// The post date is extracted from the video URL's snowflake ID.
 export async function fetchTopVideos(
   nicheSlug: string,
   days: number,
   page: number = 1,
   limit: number = 50
 ): Promise<{ videos: VideoWithProduct[]; total: number }> {
-  const cutoff = getCutoffDate(days);
   const offset = (page - 1) * limit;
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  // Step 1: Get product_ids for the niche
-  const { data: products } = await query('products', {
+  // Step 1: Get ALL product_ids for the niche
+  const productParams: Record<string, string> = {
     select: 'product_id',
-    niche_slug: `eq.${nicheSlug}`,
-  });
+    limit: '2000',
+  };
+  if (nicheSlug !== 'all') {
+    productParams.niche_slug = `eq.${nicheSlug}`;
+  }
+  const { data: products } = await query('products', productParams);
 
   if (!products || products.length === 0) return { videos: [], total: 0 };
 
   const productIds = products.map((p: any) => p.product_id);
 
-  // Step 2: Get videos for those product IDs, sorted by view_count desc
-  // Supabase REST API supports `in` filter
-  // We need to batch if there are too many IDs (URL length limit)
+  // Step 2: Get ALL videos for those products
   const batchSize = 150;
   let allVideos: any[] = [];
 
@@ -163,19 +187,50 @@ export async function fetchTopVideos(
     const { data: videos } = await query('product_videos', {
       select: '*',
       product_id: `in.${inList}`,
-      created_at: `gte.${cutoff}`,
       order: 'view_count.desc',
-      limit: '1000',
+      limit: '5000',
       offset: '0',
     });
 
     if (videos) allVideos = allVideos.concat(videos);
   }
 
-  // Sort all videos by view_count desc and paginate
-  allVideos.sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
-  const total = allVideos.length;
-  const pageVideos = allVideos.slice(offset, offset + limit);
+  // Step 3: Deduplicate by video ID (same video can appear under different products or URL formats)
+  const seenVideoIds = new Set<string>();
+  const deduped = allVideos.filter((v: any) => {
+    const vidId = v.video_url?.match(/video\/(\d+)/)?.[1];
+    if (!vidId || seenVideoIds.has(vidId)) return false;
+    seenVideoIds.add(vidId);
+    return true;
+  });
+
+  // Step 4: Annotate each video with its actual TikTok post date
+  const annotated = deduped.map((v: any) => ({
+    ...v,
+    _postDate: extractPostDate(v.video_url),
+  })).filter((v: any) => v._postDate !== null);
+
+  // Step 5: Filter by actual TikTok post date
+  let filteredVideos = annotated.filter((v: any) => v._postDate >= cutoffDate);
+
+  // Minimum video counts per timeframe:
+  // 1 week: 50, 2 weeks: 100, 1 month+: 200
+  const minCounts: Record<number, number> = { 7: 50, 14: 100, 30: 200, 90: 200, 180: 200, 365: 200 };
+  const minCount = minCounts[days] || 50;
+
+  // If we don't have enough, progressively expand the window
+  if (filteredVideos.length < minCount) {
+    // Sort ALL videos by post date (most recent first), take the top N
+    const byRecency = [...annotated].sort((a: any, b: any) => 
+      (b._postDate?.getTime() || 0) - (a._postDate?.getTime() || 0)
+    );
+    filteredVideos = byRecency.slice(0, Math.max(minCount, filteredVideos.length));
+  }
+
+  // Sort by view_count desc and paginate
+  filteredVideos.sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
+  const total = filteredVideos.length;
+  const pageVideos = filteredVideos.slice(offset, offset + limit);
 
   // Step 3: Get product details for the videos on this page
   const videoProductIds = [...new Set(pageVideos.map((v: any) => v.product_id))];
@@ -203,26 +258,98 @@ export async function fetchTopVideos(
   return { videos: videosWithProducts, total };
 }
 
-// Fetch products for a niche with timeframe filter
+// Fetch products for a niche with time-scoped data.
+// Uses snapshot deltas when available, falls back to cumulative data.
 export async function fetchProducts(
   nicheSlug: string,
   days: number,
   page: number = 1,
   limit: number = 50
-): Promise<{ products: Product[]; total: number }> {
-  const cutoff = getCutoffDate(days);
+): Promise<{ products: (Product & { period_sold?: number; period_revenue?: number })[]; total: number }> {
   const offset = (page - 1) * limit;
 
-  const { data, count } = await query('products', {
+  // Get all products for this niche
+  const { data: allProducts } = await query('products', {
     select: '*',
     niche_slug: `eq.${nicheSlug}`,
-    updated_at: `gte.${cutoff}`,
-    order: 'sold_count.desc',
-    limit: limit.toString(),
-    offset: offset.toString(),
+    limit: '2000',
   });
 
-  return { products: (data || []) as Product[], total: count || 0 };
+  if (!allProducts || allProducts.length === 0) return { products: [], total: 0 };
+
+  // Try to get snapshot data for delta calculations
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  const cutoffStr = cutoffDate.toISOString().split('T')[0];
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Get snapshots for all products in this niche
+  const productIds = allProducts.map((p: any) => p.product_id);
+  const batchSize = 150;
+  let allSnapshots: any[] = [];
+
+  for (let i = 0; i < productIds.length; i += batchSize) {
+    const batch = productIds.slice(i, i + batchSize);
+    const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
+    const { data: snaps } = await query('product_snapshots', {
+      select: '*',
+      product_id: `in.${inList}`,
+      order: 'snapshot_date.asc',
+      limit: '5000',
+    });
+    if (snaps) allSnapshots = allSnapshots.concat(snaps);
+  }
+
+  // Build snapshot map: product_id -> sorted snapshots
+  const snapMap: Record<string, any[]> = {};
+  for (const s of allSnapshots) {
+    if (!snapMap[s.product_id]) snapMap[s.product_id] = [];
+    snapMap[s.product_id].push(s);
+  }
+
+  // Calculate period-specific metrics for each product
+  const enrichedProducts = allProducts.map((p: any) => {
+    const snaps = snapMap[p.product_id] || [];
+    const price = p.sale_price || 0;
+
+    if (snaps.length >= 2) {
+      // Find the closest snapshot to the cutoff date and the most recent one
+      const sortedSnaps = snaps.sort((a: any, b: any) => a.snapshot_date.localeCompare(b.snapshot_date));
+      const latestSnap = sortedSnaps[sortedSnaps.length - 1];
+      
+      // Find snapshot closest to cutoff
+      let earliestSnap = sortedSnaps[0];
+      for (const s of sortedSnaps) {
+        if (s.snapshot_date <= cutoffStr) earliestSnap = s;
+        else break;
+      }
+
+      const deltaSold = Math.max(0, (latestSnap.sold_count || 0) - (earliestSnap.sold_count || 0));
+      const snapPrice = latestSnap.sale_price || earliestSnap.sale_price || price;
+      
+      return {
+        ...p,
+        period_sold: deltaSold,
+        period_revenue: deltaSold * snapPrice,
+        _sortValue: deltaSold,
+      };
+    }
+
+    // No delta data — use cumulative values
+    return {
+      ...p,
+      period_sold: p.sold_count || 0,
+      period_revenue: (p.sold_count || 0) * price,
+      _sortValue: p.sold_count || 0,
+    };
+  });
+
+  // Sort by period sold (descending) and paginate
+  enrichedProducts.sort((a: any, b: any) => (b._sortValue || 0) - (a._sortValue || 0));
+  const total = enrichedProducts.length;
+  const pageProducts = enrichedProducts.slice(offset, offset + limit);
+
+  return { products: pageProducts, total };
 }
 
 // Fetch top videos for a product (for product table thumbnails)

@@ -5,6 +5,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BookmarkProvider } from "@/lib/bookmarks";
+import { SubscriptionProvider } from "@/hooks/use-subscription";
+import { PaywallModal } from "@/components/PaywallModal";
 import AppSidebar from "@/components/AppSidebar";
 import VideosPage from "@/pages/videos";
 import ProductsPage from "@/pages/products";
@@ -38,10 +40,13 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BookmarkProvider>
-          <Toaster />
-          <Router hook={useHashLocation}>
-            <AppRouter />
-          </Router>
+          <SubscriptionProvider>
+            <Toaster />
+            <PaywallModal />
+            <Router hook={useHashLocation}>
+              <AppRouter />
+            </Router>
+          </SubscriptionProvider>
         </BookmarkProvider>
       </TooltipProvider>
     </QueryClientProvider>

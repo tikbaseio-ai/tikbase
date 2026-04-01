@@ -5,19 +5,22 @@ import {
   fetchTopVideos,
   formatViews,
   timeAgo,
+  extractPostDate,
   type VideoWithProduct,
 } from '@/lib/supabase';
 import { useBookmarks } from '@/lib/bookmarks';
-import { Bookmark, ExternalLink, Eye, ShoppingBag, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useSubscription } from '@/hooks/use-subscription';
+import { Bookmark, ExternalLink, Eye, ShoppingBag, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 
 export default function VideosPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
-  const [timeframe, setTimeframe] = useState(TIMEFRAMES[0]);
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2]); // Default to 1 Month
   const [videos, setVideos] = useState<VideoWithProduct[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const { isVideoBookmarked, toggleVideoBookmark } = useBookmarks();
+  const { isPaid, showPaywall } = useSubscription();
 
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
@@ -143,12 +146,25 @@ export default function VideosPage() {
                         alt=""
                         className="w-full h-full object-cover"
                         loading="lazy"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const fallback = target.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
                       />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">
-                        No thumbnail
+                    ) : null}
+                    <div
+                      className="w-full h-full items-center justify-center bg-gradient-to-b from-zinc-800 to-zinc-900"
+                      style={{ display: video.cover_image_url ? 'none' : 'flex' }}
+                    >
+                      <div className="text-center">
+                        <div className="w-12 h-12 rounded-full bg-[#a3ff00]/20 flex items-center justify-center mx-auto mb-2">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a3ff00" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </div>
+                        <span className="text-[10px] font-mono text-zinc-500">{formatViews(video.view_count || 0)} views</span>
                       </div>
-                    )}
+                    </div>
 
                     {/* Rank badge */}
                     <div
@@ -184,10 +200,11 @@ export default function VideosPage() {
                     {/* Video link */}
                     {video.video_url && (
                       <a
-                        href={video.video_url}
+                        href={isPaid ? video.video_url : undefined}
+                        onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('video_detail'); } }}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-colors"
+                        className="absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-colors cursor-pointer"
                         data-testid={`link-video-${video.id}`}
                       >
                         <ExternalLink size={12} className="text-white/70" />
@@ -211,48 +228,54 @@ export default function VideosPage() {
                         {video.author_name || 'Unknown'}
                       </span>
                       <span className="text-[10px] text-muted-foreground ml-auto flex-shrink-0">
-                        {timeAgo(video.created_at)}
+                        {(() => {
+                          const postDate = extractPostDate(video.video_url);
+                          return postDate ? timeAgo(postDate.toISOString()) : timeAgo(video.created_at);
+                        })()}
                       </span>
                     </div>
 
-                    {/* Product Analytics */}
+                    {/* Product Card */}
                     {video.product && (
-                      <div className="pt-2 border-t border-border">
-                        <div className="flex items-center gap-1 mb-1.5">
-                          <ShoppingBag size={10} className="text-[#a3ff00]" />
-                          <span className="text-[10px] font-mono font-semibold tracking-wider text-[#a3ff00] uppercase">
-                            Product Analytics
-                          </span>
-                        </div>
-                        <div className="flex items-start gap-2">
-                          {video.product.image_url && (
+                      <div className="mt-2 rounded-lg border border-border bg-zinc-900/50 overflow-hidden">
+                        <div className="flex items-center gap-3 p-2.5">
+                          <div className="w-16 h-16 rounded-md flex-shrink-0 border border-border overflow-hidden bg-zinc-800">
                             <img
-                              src={video.product.image_url}
+                              src={video.product.image_url || video.cover_image_url || ''}
                               alt=""
-                              className="w-10 h-10 rounded object-cover flex-shrink-0 border border-border"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const img = e.target as HTMLImageElement;
+                                // If product image fails, try video thumbnail
+                                if (img.src !== (video.cover_image_url || '') && video.cover_image_url) {
+                                  img.src = video.cover_image_url;
+                                } else {
+                                  img.style.display = 'none';
+                                }
+                              }}
                             />
-                          )}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs text-foreground font-medium leading-snug line-clamp-2">
                               {video.product.title}
                             </p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[10px] font-mono text-muted-foreground">
-                                {(video.product.sold_count || 0).toLocaleString()} sold
-                              </span>
-                              {video.product.product_url && (
-                                <a
-                                  href={video.product.product_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[10px] text-[#a3ff00] hover:underline"
-                                >
-                                  View
-                                </a>
-                              )}
-                            </div>
+                            <span className="inline-block mt-1 text-[10px] font-mono font-semibold text-[#a3ff00] bg-[#a3ff00]/10 px-1.5 py-0.5 rounded">
+                              {(video.product.sold_count || 0).toLocaleString()} sold
+                            </span>
                           </div>
                         </div>
+                        {video.product.product_url && (
+                          <a
+                            href={isPaid ? video.product.product_url : undefined}
+                            onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('product_detail'); } }}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-1.5 py-2 border-t border-border text-[11px] font-medium text-[#a3ff00] hover:bg-[#a3ff00]/5 transition-colors cursor-pointer"
+                          >
+                            <ExternalLink size={11} />
+                            View Product
+                          </a>
+                        )}
                       </div>
                     )}
                   </div>
@@ -276,7 +299,11 @@ export default function VideosPage() {
                 {page} / {totalPages}
               </span>
               <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => {
+                  const nextFirstRank = page * limit + 1;
+                  if (!isPaid && nextFirstRank > 100) { showPaywall('videos_101'); return; }
+                  setPage(p => Math.min(totalPages, p + 1));
+                }}
                 disabled={page === totalPages}
                 className="h-9 w-9 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-30 disabled:pointer-events-none transition-colors"
                 data-testid="page-next"

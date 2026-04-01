@@ -236,18 +236,21 @@ export async function fetchTopVideos(
     }
   }
 
-  const videosWithProducts: VideoWithProduct[] = pageVideos.map((v: any) => {
-    const product = productsMap[v.product_id];
-    // Filter out placeholder/category-level products that aren't real
-    const isPlaceholder = product && (
-      (product.title && product.title.includes('Discovered Videos')) ||
-      (product.sold_count === 0 && product.review_count === 0 && product.rating === 0)
-    );
-    return {
-      ...v,
-      product: isPlaceholder ? undefined : product,
-    };
-  });
+  const videosWithProducts: VideoWithProduct[] = pageVideos
+    .map((v: any) => {
+      const product = productsMap[v.product_id];
+      // Filter out placeholder/category-level products that aren't real
+      const isPlaceholder = product && (
+        (product.title && product.title.includes('Discovered Videos')) ||
+        (product.sold_count === 0 && product.review_count === 0 && product.rating === 0)
+      );
+      return {
+        ...v,
+        product: isPlaceholder ? undefined : product,
+      };
+    })
+    // Remove videos that have no real product linked
+    .filter((v: VideoWithProduct) => v.product !== undefined);
 
   return { videos: videosWithProducts, total };
 }

@@ -210,18 +210,11 @@ export async function fetchTopVideos(
     _postDate: extractPostDate(v.video_url),
   })).filter((v: any) => v._postDate !== null);
 
-  // Step 5: Filter by actual TikTok post date
-  let filteredVideos = annotated.filter((v: any) => v._postDate >= cutoffDate);
-
-  // If too few recent videos, show all videos sorted by most recent first
-  if (filteredVideos.length < 50) {
-    filteredVideos = [...annotated].sort((a: any, b: any) => 
-      (b._postDate?.getTime() || 0) - (a._postDate?.getTime() || 0)
-    );
-  }
-
-  // Sort by view_count desc — return ALL, let frontend handle pagination
-  filteredVideos.sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
+  // Step 5: Filter by actual TikTok post date — strict, no fallback
+  // If "2 Weeks" is selected, only show videos posted in the last 14 days. Period.
+  const filteredVideos = annotated
+    .filter((v: any) => v._postDate >= cutoffDate)
+    .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
   const total = filteredVideos.length;
   const pageVideos = filteredVideos.slice(offset, offset + limit);
 

@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Check, X, Loader2 } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 
-const STRIPE_PUBLISHABLE_KEY = 'pk_live_51TDM7eCmsZejQhLSlrfsrArLJutabj6RtpopMWXkzMy3LkHtcpca00E7SpxEdb7tb5kW1NMttsTJT8mZ8wOfPx5Q00ikkKDrCT';
-const STRIPE_PRICES = {
-  monthly: 'price_1THHz2CmsZejQhLSRBkSjObx',
-  annual: 'price_1THHz3CmsZejQhLScuVuKg8o',
+const STRIPE_LINKS = {
+  monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
+  annual: 'https://buy.stripe.com/cNi3cufPm9ST5GR9h1fIs02',
 };
 
 const FEATURES = [
@@ -22,37 +21,14 @@ const FEATURES = [
 
 export default function PlansPage() {
   const [annual, setAnnual] = useState(false);
-  const [loading, setLoading] = useState(false);
   const monthlyPrice = 44.99;
   const annualPrice = 31.49;
   const currentPrice = annual ? annualPrice : monthlyPrice;
   const savingsPercent = 30;
 
-  async function handleUpgrade() {
-    setLoading(true);
-    try {
-      // Load Stripe.js dynamically
-      if (!(window as any).Stripe) {
-        const script = document.createElement('script');
-        script.src = 'https://js.stripe.com/v3/';
-        document.head.appendChild(script);
-        await new Promise(resolve => { script.onload = resolve; });
-      }
-      const stripe = (window as any).Stripe(STRIPE_PUBLISHABLE_KEY);
-      const priceId = annual ? STRIPE_PRICES.annual : STRIPE_PRICES.monthly;
-      
-      const { error } = await stripe.redirectToCheckout({
-        lineItems: [{ price: priceId, quantity: 1 }],
-        mode: 'subscription',
-        successUrl: window.location.origin + '/#/billing?success=true',
-        cancelUrl: window.location.origin + '/#/plans',
-      });
-      if (error) console.error('Stripe error:', error.message);
-    } catch (e) {
-      console.error('Checkout error:', e);
-    } finally {
-      setLoading(false);
-    }
+  function handleUpgrade() {
+    const link = annual ? STRIPE_LINKS.annual : STRIPE_LINKS.monthly;
+    window.open(link, '_blank', 'noopener,noreferrer');
   }
 
   return (
@@ -159,12 +135,11 @@ export default function PlansPage() {
           {!annual && <div className="mb-4" />}
           <button
             onClick={handleUpgrade}
-            disabled={loading}
-            className="w-full h-10 rounded-md text-sm font-bold transition-colors mb-6 flex items-center justify-center gap-2 disabled:opacity-70"
+            className="w-full h-10 rounded-md text-sm font-bold transition-colors mb-6"
             style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
             data-testid="btn-upgrade"
           >
-            {loading ? <><Loader2 size={14} className="animate-spin" /> Processing...</> : 'Upgrade to Pro'}
+            Upgrade to Pro
           </button>
           <ul className="space-y-3">
             {FEATURES.map(f => (

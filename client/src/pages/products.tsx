@@ -293,7 +293,7 @@ export default function ProductsPage() {
                 {(() => {
                   return pageProducts.map((product, idx) => {
                   const rank = (page - 1) * limit + idx + 1;
-                  const isRowLocked = !isPaid && (rank < 100 || rank > 148);
+                  const isRowLocked = !isPaid && (rank < 101 || rank > 150);
                   const m = product.metrics;
                   const price = product.sale_price || 0;
                   const bookmarked = isProductBookmarked(product.product_id);

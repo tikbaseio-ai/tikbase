@@ -281,8 +281,12 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {pageProducts.map((product, idx) => {
+                {(() => {
+                  // Lock top 75% of products for free users (only bottom 25% visible)
+                  const paywallCutoff = isPaid ? 0 : Math.floor(sortedProducts.length * 0.75);
+                  return pageProducts.map((product, idx) => {
                   const rank = (page - 1) * limit + idx + 1;
+                  const isRowLocked = !isPaid && rank <= paywallCutoff;
                   const m = product.metrics;
                   const price = product.sale_price || 0;
                   const bookmarked = isProductBookmarked(product.product_id);
@@ -291,6 +295,28 @@ export default function ProductsPage() {
                   const displayVideos = [...product.videos]
                     .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
                     .slice(0, 5);
+
+                  if (isRowLocked) {
+                    return (
+                      <tr key={product.product_id} className="relative cursor-pointer" onClick={() => showPaywall('top_products')}>
+                        <td className="py-3 px-3">
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold"
+                            style={rank <= 3 ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : { backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}>
+                            {rank}
+                          </span>
+                        </td>
+                        <td colSpan={10} className="py-3 px-3">
+                          <div className="relative overflow-hidden rounded h-10 flex items-center">
+                            <div className="absolute inset-0 bg-muted/40 backdrop-blur-sm" />
+                            <div className="relative z-10 flex items-center gap-2 w-full justify-center">
+                              <Lock size={14} className="text-[#a3ff00]" />
+                              <span className="text-[11px] font-medium text-white">Upgrade to unlock</span>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
 
                   return (
                     <tr key={product.product_id} className="hover:bg-secondary/30 transition-colors">
@@ -430,7 +456,8 @@ export default function ProductsPage() {
                       </td>
                     </tr>
                   );
-                })}
+                });
+                })()}
               </tbody>
             </table>
           </div>

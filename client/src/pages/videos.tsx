@@ -26,8 +26,8 @@ export default function VideosPage() {
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
 
-  // Lock top 50% of videos for free users (minimum 10)
-  const paywallCutoff = isPaid ? 0 : Math.max(10, Math.ceil(total * 0.5));
+  // Lock top 75% of videos for free users (only bottom 25% visible)
+  const paywallCutoff = isPaid ? 0 : Math.floor(total * 0.75);
 
   useEffect(() => {
     setPage(1);

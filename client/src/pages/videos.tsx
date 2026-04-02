@@ -157,7 +157,7 @@ export default function VideosPage() {
             {videos.map((video, idx) => {
               const rank = (page - 1) * limit + idx + 1;
               const bookmarked = isVideoBookmarked(video.id);
-              const isLocked = !isPaid && (rank < 100 || rank > 148);
+              const isLocked = !isPaid && (rank < 101 || rank > 150);
 
               if (isLocked) {
                 return (

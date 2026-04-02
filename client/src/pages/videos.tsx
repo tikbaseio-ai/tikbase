@@ -26,14 +26,12 @@ export default function VideosPage() {
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
 
-  // Lock top 75% of videos for free users (only bottom 25% visible)
-  const paywallCutoff = isPaid ? 0 : Math.floor(total * 0.75);
-
-  // Free users default to "1 Year" tab
+  // Free users default to "1 Year" tab and page 3
   useEffect(() => {
     if (!isPaid) {
       const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
       if (oneYear) setTimeframe(oneYear);
+      setPage(3);
     }
   }, [isPaid]);
 
@@ -159,7 +157,7 @@ export default function VideosPage() {
             {videos.map((video, idx) => {
               const rank = (page - 1) * limit + idx + 1;
               const bookmarked = isVideoBookmarked(video.id);
-              const isLocked = rank <= paywallCutoff;
+              const isLocked = !isPaid && (rank < 100 || rank > 148);
 
               if (isLocked) {
                 return (

@@ -111,11 +111,12 @@ export default function ProductsPage() {
     return () => { cancelled = true; };
   }, [niche]);
 
-  // Free users default to "1 Year" tab
+  // Free users default to "1 Year" tab and page 3
   useEffect(() => {
     if (!isPaid) {
       const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
       if (oneYear) setTimeframe(oneYear);
+      setPage(3);
     }
   }, [isPaid]);
 
@@ -290,10 +291,9 @@ export default function ProductsPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {(() => {
-                  const paywallCutoff = isPaid ? 0 : Math.floor(sortedProducts.length * 0.75);
                   return pageProducts.map((product, idx) => {
                   const rank = (page - 1) * limit + idx + 1;
-                  const isRowLocked = !isPaid && rank <= paywallCutoff;
+                  const isRowLocked = !isPaid && (rank < 100 || rank > 148);
                   const m = product.metrics;
                   const price = product.sale_price || 0;
                   const bookmarked = isProductBookmarked(product.product_id);

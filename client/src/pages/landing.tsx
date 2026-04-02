@@ -121,16 +121,16 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="rounded-lg overflow-hidden bg-[#19191c] shadow-xl">
                 <img
-                  alt="Analytics Dashboard View 1"
+                  alt="TikBase Videos Dashboard"
                   className="w-full h-full object-cover"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuAS6Cpiiw_7vgyY05tehmuA_Z2ZDiQINLmpCj43889_Dkhl7NcQaWBZkbnaPjQPStxHvNG776_rB5RqgLG1OOhNIpoP7IM-PS7Q2eYpq4RObOXAsuj79nXWiSzCFynYLf_2zQrFJ1TBDYMEFp4ZXF1kpBRB4xfJ8iTsp7knnLnndIIwEyTMYMvizhRAcGabOZE2xDsWWNnBqP0yrHSk2Ru0dPw89fNP5mD9iiXzo4ds0p_GpHVRA7_1a3GFuCjBK2SeBR1_Ffqc_gA"
+                  src="/screenshot-videos.jpg"
                 />
               </div>
               <div className="rounded-lg overflow-hidden bg-[#19191c] shadow-xl">
                 <img
-                  alt="Analytics Dashboard View 2"
+                  alt="TikBase Products Dashboard"
                   className="w-full h-full object-cover"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBsONJ8VGa5wbUOPJIAzBqwWjNTeV2RvD_wcNsD7PbLdqjeF7SN5ca4y6HLefXUrA8y_5AVBWm7cP0olflTodLLKNuVoHqGkEVkwqQNWo5LtRpYvXTnY4tJ7iyjlIDu-Dy8Rchf_iKKSdrN3AP-26PZzST6fqIRW6AjSSQRhAsuF2wKZGJjBvph23UVG3K-sTPuERaq5sx8K2QkanK7OUPT9IAJqa8mchqljvHxc4O8WYSQkmXkgqrL9nKbdsjUBrP9AEe2kbKyTdM"
+                  src="/screenshot-products.jpg"
                 />
               </div>
             </div>

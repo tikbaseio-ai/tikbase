@@ -111,6 +111,14 @@ export default function ProductsPage() {
     return () => { cancelled = true; };
   }, [niche]);
 
+  // Free users default to "1 Year" tab
+  useEffect(() => {
+    if (!isPaid) {
+      const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
+      if (oneYear) setTimeframe(oneYear);
+    }
+  }, [isPaid]);
+
   useEffect(() => { setPage(1); }, [timeframe, sortKey, sortDir]);
 
   // Compute metrics for all products based on current timeframe
@@ -209,7 +217,7 @@ export default function ProductsPage() {
 
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
           {TIMEFRAMES.map(tf => {
-            const isLocked = !isPaid && tf.label !== '2 Weeks';
+            const isLocked = !isPaid && tf.label !== '1 Year';
             return (
               <button key={tf.label}
                 onClick={() => {

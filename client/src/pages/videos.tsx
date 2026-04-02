@@ -29,6 +29,14 @@ export default function VideosPage() {
   // Lock top 75% of videos for free users (only bottom 25% visible)
   const paywallCutoff = isPaid ? 0 : Math.floor(total * 0.75);
 
+  // Free users default to "1 Year" tab
+  useEffect(() => {
+    if (!isPaid) {
+      const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
+      if (oneYear) setTimeframe(oneYear);
+    }
+  }, [isPaid]);
+
   useEffect(() => {
     setPage(1);
   }, [niche, timeframe]);
@@ -88,7 +96,7 @@ export default function VideosPage() {
         {/* Timeframe pills */}
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
           {TIMEFRAMES.map(tf => {
-            const isLocked = !isPaid && tf.label !== '2 Weeks';
+            const isLocked = !isPaid && tf.label !== '1 Year';
             return (
               <button
                 key={tf.label}

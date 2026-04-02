@@ -282,7 +282,6 @@ export default function ProductsPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {(() => {
-                  // Lock top 75% of products for free users (only bottom 25% visible)
                   const paywallCutoff = isPaid ? 0 : Math.floor(sortedProducts.length * 0.75);
                   return pageProducts.map((product, idx) => {
                   const rank = (page - 1) * limit + idx + 1;

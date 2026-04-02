@@ -56,13 +56,13 @@ export default function BillingPage() {
           You are on the Free plan. Upgrade to Pro for full access.
         </p>
         <a
-          href="#/plans"
+          href="#/dashboard/plans"
           className="inline-flex items-center h-8 px-4 rounded-md text-xs font-bold transition-colors no-underline"
           style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
           data-testid="btn-view-plans"
           onClick={(e) => {
             e.preventDefault();
-            window.location.hash = '#/plans';
+            window.location.hash = '#/dashboard/plans';
           }}
         >
           View Plans

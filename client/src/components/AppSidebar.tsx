@@ -1,20 +1,22 @@
 import { Link, useLocation } from 'wouter';
-import { Play, Package, Bookmark, CreditCard, Receipt, Settings } from 'lucide-react';
+import { Play, Package, Bookmark, CreditCard, Receipt, Settings, LogOut } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Videos', icon: Play },
-  { path: '/products', label: 'Products', icon: Package },
-  { path: '/saved', label: 'Saved', icon: Bookmark },
+  { path: '/dashboard', label: 'Videos', icon: Play },
+  { path: '/dashboard/products', label: 'Products', icon: Package },
+  { path: '/dashboard/saved', label: 'Saved', icon: Bookmark },
 ];
 
 const BOTTOM_ITEMS = [
-  { path: '/plans', label: 'Plans', icon: CreditCard },
-  { path: '/billing', label: 'Billing', icon: Receipt },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/dashboard/plans', label: 'Plans', icon: CreditCard },
+  { path: '/dashboard/billing', label: 'Billing', icon: Receipt },
+  { path: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
 export default function AppSidebar() {
   const [location] = useLocation();
+  const { signOut } = useAuth();
 
   return (
     <aside
@@ -24,7 +26,7 @@ export default function AppSidebar() {
     >
       {/* Logo */}
       <div className="h-14 flex items-center px-5 border-b border-border">
-        <Link href="/" className="flex items-center gap-2.5 no-underline">
+        <Link href="/dashboard" className="flex items-center gap-2.5 no-underline">
           <div
             className="w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm"
             style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
@@ -82,6 +84,14 @@ export default function AppSidebar() {
               </Link>
             );
           })}
+          <button
+            onClick={() => signOut()}
+            className="flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-secondary/50 w-full border-none bg-transparent cursor-pointer text-left"
+            data-testid="nav-logout"
+          >
+            <LogOut size={16} strokeWidth={1.5} />
+            Log out
+          </button>
         </div>
       </nav>
 

@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signInWithGoogle() {
     const { error } = await supabaseAuth.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: 'https://tikbase.io' },
+      options: { redirectTo: window.location.origin },
     });
     return { error: error as Error | null };
   }

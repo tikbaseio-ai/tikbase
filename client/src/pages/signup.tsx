@@ -8,18 +8,21 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
     const { error } = await signUpWithEmail(email, password);
     if (error) {
       setError(error.message);
       setLoading(false);
     } else {
-      setLocation('/dashboard');
+      setSuccess('Check your email for a confirmation link, then sign in.');
+      setLoading(false);
     }
   }
 
@@ -88,6 +91,9 @@ export default function SignupPage() {
 
             {error && (
               <p className="text-[#ff7351] text-sm">{error}</p>
+            )}
+            {success && (
+              <p className="text-[#ddffaf] text-sm">{success}</p>
             )}
 
             <button

@@ -48,7 +48,7 @@ export default function LandingPage() {
                 <img
                   alt="SaaS Dashboard Interface"
                   className="w-full aspect-[16/10] object-cover"
-                  src="https://lh3.googleusercontent.com/aida/ADBb0ujn9JBEEuX4Cg4N5lh583N0FGB2nar_K3MuGw_FjEjCRbKWHl0NAjqhtwB3Fm09AhjilT1hLXl4GZZZE8fr6pj7VzWD1DfY6rz9f0fYmt_31fTuUPAKOoGfSsLqHnrAmzTjgCZQjmUhulJiw2_lrV0If2d0IRU-ahnQqTrxYCmvmGTbTdqyJmenPc29rpLzYGRDW3s44ZPu8SXrRL3vTucL3QTLth2XLdg2GFFntW1ybODiRGZLhjIS5Y5iXgWMiUNDcD6btXfUJQ"
+                  src="/hero-dashboard.jpg"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0e0e10] via-transparent to-transparent opacity-40" />
               </div>

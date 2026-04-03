@@ -37,5 +37,27 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/check-subscription", async (req, res) => {
+    try {
+      const email = req.query.email as string;
+      if (!email) return res.json({ isPaid: false });
+
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+      const customers = await stripe.customers.list({ email, limit: 1 });
+
+      if (customers.data.length === 0) return res.json({ isPaid: false });
+
+      const subscriptions = await stripe.subscriptions.list({
+        customer: customers.data[0].id,
+        status: 'active',
+        limit: 1,
+      });
+
+      return res.json({ isPaid: subscriptions.data.length > 0 });
+    } catch (err) {
+      return res.json({ isPaid: false });
+    }
+  });
+
   return httpServer;
 }

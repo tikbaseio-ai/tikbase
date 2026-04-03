@@ -1,4 +1,5 @@
-import { useState, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
+import { useAuth } from '@/lib/auth';
 
 interface SubscriptionState {
   isPaid: boolean;
@@ -17,10 +18,29 @@ const SubscriptionContext = createContext<SubscriptionState>({
 });
 
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
-  // For now, everyone is free. When auth + Stripe webhooks are wired up,
-  // this will check the user's subscription status from Supabase.
-  const [isPaid] = useState(false);
+  const { user } = useAuth();
+  const [isPaid, setIsPaid] = useState(false);
+  const [checkingSubscription, setCheckingSubscription] = useState(true);
   const [paywallVisible, setPaywallVisible] = useState(false);
+
+  useEffect(() => {
+    if (!user?.email) {
+      setIsPaid(false);
+      setCheckingSubscription(false);
+      return;
+    }
+
+    fetch(`/api/check-subscription?email=${encodeURIComponent(user.email)}`)
+      .then(r => r.json())
+      .then(data => {
+        setIsPaid(data.isPaid === true);
+        setCheckingSubscription(false);
+      })
+      .catch(() => {
+        setIsPaid(false);
+        setCheckingSubscription(false);
+      });
+  }, [user?.email]);
   const [paywallFeature, setPaywallFeature] = useState<string | null>(null);
 
   function showPaywall(feature?: string) {

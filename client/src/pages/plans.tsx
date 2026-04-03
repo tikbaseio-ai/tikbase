@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, X, Tag } from 'lucide-react';
+import { useSubscription } from '@/hooks/use-subscription';
 
 const STRIPE_LINKS = {
   monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
@@ -27,11 +28,14 @@ export default function PlansPage() {
   const currentPrice = annual ? annualPrice : monthlyPrice;
   const savingsPercent = 30;
 
+  const { markStripeOpened } = useSubscription();
+
   function handleUpgrade() {
     let link = annual ? STRIPE_LINKS.annual : STRIPE_LINKS.monthly;
     if (promoCode.trim()) {
       link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
     }
+    markStripeOpened();
     window.open(link, '_blank', 'noopener,noreferrer');
   }
 

@@ -18,7 +18,7 @@ const FEATURE_MESSAGES: Record<string, string> = {
 };
 
 export function PaywallModal() {
-  const { paywallVisible, paywallFeature, closePaywall } = useSubscription();
+  const { paywallVisible, paywallFeature, closePaywall, markStripeOpened } = useSubscription();
   const [promoCode, setPromoCode] = useState('');
 
   function handleCheckout(plan: 'monthly' | 'annual') {
@@ -26,6 +26,7 @@ export function PaywallModal() {
     if (promoCode.trim()) {
       link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
     }
+    markStripeOpened();
     window.open(link, '_blank', 'noopener,noreferrer');
   }
 

@@ -6,6 +6,24 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
+// Simple in-memory cache for expensive queries
+const queryCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached<T>(key: string): T | null {
+  const entry = queryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    queryCache.delete(key);
+    return null;
+  }
+  return entry.data as T;
+}
+
+function setCache(key: string, data: any): void {
+  queryCache.set(key, { data, timestamp: Date.now() });
+}
+
 const headers = {
   'apikey': SUPABASE_ANON_KEY,
   'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -159,6 +177,18 @@ export async function fetchTopVideos(
   limit: number = 50
 ): Promise<{ videos: VideoWithProduct[]; total: number }> {
   const offset = (page - 1) * limit;
+
+  // Check cache first — stores the full enriched video list for this niche+timeframe
+  const cacheKey = `videos:${nicheSlug}:${days}`;
+  type VideoCache = { videos: VideoWithProduct[]; total: number };
+  const cached = getCached<VideoCache>(cacheKey);
+  if (cached) {
+    return {
+      videos: cached.videos.slice(offset, offset + limit),
+      total: cached.total,
+    };
+  }
+
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
@@ -183,7 +213,7 @@ export async function fetchTopVideos(
   for (let i = 0; i < productIds.length; i += batchSize) {
     const batch = productIds.slice(i, i + batchSize);
     const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
-    
+
     const { data: videos } = await query('product_videos', {
       select: '*',
       product_id: `in.${inList}`,
@@ -211,20 +241,17 @@ export async function fetchTopVideos(
   })).filter((v: any) => v._postDate !== null);
 
   // Step 5: Filter by actual TikTok post date — strict, no fallback
-  // If "2 Weeks" is selected, only show videos posted in the last 14 days. Period.
   const filteredVideos = annotated
     .filter((v: any) => v._postDate >= cutoffDate)
     .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
-  const total = filteredVideos.length;
-  const pageVideos = filteredVideos.slice(offset, offset + limit);
 
-  // Step 3: Get product details for the videos on this page
-  const videoProductIds = [...new Set(pageVideos.map((v: any) => v.product_id))];
+  // Step 6: Get product details for ALL filtered videos (so cache is complete)
+  const allVideoProductIds = [...new Set(filteredVideos.map((v: any) => v.product_id))] as string[];
 
   let productsMap: Record<string, Product> = {};
-  if (videoProductIds.length > 0) {
-    for (let i = 0; i < videoProductIds.length; i += batchSize) {
-      const batch = videoProductIds.slice(i, i + batchSize);
+  if (allVideoProductIds.length > 0) {
+    for (let i = 0; i < allVideoProductIds.length; i += batchSize) {
+      const batch = allVideoProductIds.slice(i, i + batchSize);
       const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
       const { data: prods } = await query('products', {
         select: '*',
@@ -237,7 +264,7 @@ export async function fetchTopVideos(
   }
 
   // For products with sold_count = 0, estimate sales from stock_quantity deltas in snapshots
-  const zeroSoldProductIds = videoProductIds.filter(
+  const zeroSoldProductIds = allVideoProductIds.filter(
     (id: string) => productsMap[id] && productsMap[id].sold_count === 0
   );
 
@@ -252,13 +279,11 @@ export async function fetchTopVideos(
         limit: '5000',
       });
       if (snaps) {
-        // Group snapshots by product_id
         const snapsByProduct: Record<string, any[]> = {};
         for (const s of snaps) {
           if (!snapsByProduct[s.product_id]) snapsByProduct[s.product_id] = [];
           snapsByProduct[s.product_id].push(s);
         }
-        // Calculate estimated sold from stock drops
         for (const [pid, productSnaps] of Object.entries(snapsByProduct)) {
           if (productSnaps.length >= 2) {
             const sorted = productSnaps.sort((a: any, b: any) => a.snapshot_date.localeCompare(b.snapshot_date));
@@ -274,20 +299,23 @@ export async function fetchTopVideos(
     }
   }
 
-  const videosWithProducts: VideoWithProduct[] = pageVideos
+  // Step 7: Build the full enriched video list with products attached
+  const allVideosWithProducts: VideoWithProduct[] = filteredVideos
     .map((v: any) => {
       const product = productsMap[v.product_id];
-      // Filter out placeholder/category-level products (e.g. "Discovered Videos")
       const isPlaceholder = product && product.title && product.title.includes('Discovered Videos');
       return {
         ...v,
         product: isPlaceholder ? undefined : product,
       };
     })
-    // Remove videos that have no real product linked
     .filter((v: VideoWithProduct) => v.product !== undefined);
 
-  return { videos: videosWithProducts, total };
+  // Cache the full enriched list
+  const total = allVideosWithProducts.length;
+  setCache(cacheKey, { videos: allVideosWithProducts, total });
+
+  return { videos: allVideosWithProducts.slice(offset, offset + limit), total };
 }
 
 // Fetch products for a niche with time-scoped data.
@@ -299,6 +327,17 @@ export async function fetchProducts(
   limit: number = 50
 ): Promise<{ products: (Product & { period_sold?: number; period_revenue?: number })[]; total: number }> {
   const offset = (page - 1) * limit;
+
+  // Check cache first — stores the full enriched product list for this niche+timeframe
+  const cacheKey = `products:${nicheSlug}:${days}`;
+  type ProductCache = { products: (Product & { period_sold?: number; period_revenue?: number })[]; total: number };
+  const cached = getCached<ProductCache>(cacheKey);
+  if (cached) {
+    return {
+      products: cached.products.slice(offset, offset + limit),
+      total: cached.total,
+    };
+  }
 
   // Get all products for this niche
   const { data: allProducts } = await query('products', {
@@ -313,7 +352,6 @@ export async function fetchProducts(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffStr = cutoffDate.toISOString().split('T')[0];
-  const todayStr = new Date().toISOString().split('T')[0];
 
   // Get snapshots for all products in this niche
   const productIds = allProducts.map((p: any) => p.product_id);
@@ -345,11 +383,9 @@ export async function fetchProducts(
     const price = p.sale_price || 0;
 
     if (snaps.length >= 2) {
-      // Find the closest snapshot to the cutoff date and the most recent one
       const sortedSnaps = snaps.sort((a: any, b: any) => a.snapshot_date.localeCompare(b.snapshot_date));
       const latestSnap = sortedSnaps[sortedSnaps.length - 1];
-      
-      // Find snapshot closest to cutoff
+
       let earliestSnap = sortedSnaps[0];
       for (const s of sortedSnaps) {
         if (s.snapshot_date <= cutoffStr) earliestSnap = s;
@@ -358,7 +394,7 @@ export async function fetchProducts(
 
       const deltaSold = Math.max(0, (latestSnap.sold_count || 0) - (earliestSnap.sold_count || 0));
       const snapPrice = latestSnap.sale_price || earliestSnap.sale_price || price;
-      
+
       return {
         ...p,
         period_sold: deltaSold,
@@ -376,12 +412,14 @@ export async function fetchProducts(
     };
   });
 
-  // Sort by period sold (descending) and paginate
+  // Sort by period sold (descending)
   enrichedProducts.sort((a: any, b: any) => (b._sortValue || 0) - (a._sortValue || 0));
   const total = enrichedProducts.length;
-  const pageProducts = enrichedProducts.slice(offset, offset + limit);
 
-  return { products: pageProducts, total };
+  // Cache the full sorted list
+  setCache(cacheKey, { products: enrichedProducts, total });
+
+  return { products: enrichedProducts.slice(offset, offset + limit), total };
 }
 
 // Fetch top videos for a product (for product table thumbnails)

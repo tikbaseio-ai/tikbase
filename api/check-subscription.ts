@@ -25,8 +25,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.json({ isPaid: false });
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    return res.json({ isPaid: false });
+    return res.json({ isPaid: false, error: err.message });
   }
 }

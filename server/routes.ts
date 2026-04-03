@@ -20,13 +20,20 @@ export async function registerRoutes(
 
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-      const customers = await stripe.customers.list({ email, limit: 1 });
+      const customers = await stripe.customers.list({ email, limit: 100 });
       if (customers.data.length === 0) {
         return res.status(404).json({ error: "No subscription found for this email" });
       }
 
+      // Find the customer that has an active subscription
+      let customerId = customers.data[0].id;
+      for (const customer of customers.data) {
+        const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'active', limit: 1 });
+        if (subs.data.length > 0) { customerId = customer.id; break; }
+      }
+
       const session = await stripe.billingPortal.sessions.create({
-        customer: customers.data[0].id,
+        customer: customerId,
         return_url: "https://tikbase.io/#/billing",
       });
 
@@ -43,17 +50,24 @@ export async function registerRoutes(
       if (!email) return res.json({ isPaid: false });
 
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-      const customers = await stripe.customers.list({ email, limit: 1 });
 
+      // Get ALL customers for this email (Stripe can create duplicates)
+      const customers = await stripe.customers.list({ email, limit: 100 });
       if (customers.data.length === 0) return res.json({ isPaid: false });
 
-      const subscriptions = await stripe.subscriptions.list({
-        customer: customers.data[0].id,
-        status: 'active',
-        limit: 1,
-      });
+      // Check every customer for an active subscription
+      for (const customer of customers.data) {
+        const subscriptions = await stripe.subscriptions.list({
+          customer: customer.id,
+          status: 'active',
+          limit: 1,
+        });
+        if (subscriptions.data.length > 0) {
+          return res.json({ isPaid: true });
+        }
+      }
 
-      return res.json({ isPaid: subscriptions.data.length > 0 });
+      return res.json({ isPaid: false });
     } catch (err) {
       return res.json({ isPaid: false });
     }

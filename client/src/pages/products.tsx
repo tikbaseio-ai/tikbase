@@ -120,7 +120,7 @@ export default function ProductsPage() {
     }
   }, [isPaid]);
 
-  useEffect(() => { setPage(1); }, [timeframe, sortKey, sortDir]);
+  useEffect(() => { setPage(!isPaid ? 3 : 1); }, [timeframe, sortKey, sortDir, isPaid]);
 
   // Compute metrics for all products based on current timeframe
   const enrichedProducts = useMemo(() => {

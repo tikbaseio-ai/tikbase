@@ -36,8 +36,8 @@ export default function VideosPage() {
   }, [isPaid]);
 
   useEffect(() => {
-    setPage(1);
-  }, [niche, timeframe]);
+    setPage(!isPaid ? 3 : 1);
+  }, [niche, timeframe, isPaid]);
 
   useEffect(() => {
     let cancelled = false;

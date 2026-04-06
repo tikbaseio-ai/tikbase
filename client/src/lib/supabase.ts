@@ -217,6 +217,7 @@ export async function fetchTopVideos(
     const { data: videos } = await query('product_videos', {
       select: '*',
       product_id: `in.${inList}`,
+      created_at: `gte.${cutoffDate.toISOString()}`,
       order: 'view_count.desc',
       limit: '5000',
       offset: '0',
@@ -234,15 +235,8 @@ export async function fetchTopVideos(
     return true;
   });
 
-  // Step 4: Annotate each video with its actual TikTok post date
-  const annotated = deduped.map((v: any) => ({
-    ...v,
-    _postDate: extractPostDate(v.video_url),
-  })).filter((v: any) => v._postDate !== null);
-
-  // Step 5: Filter by actual TikTok post date — strict, no fallback
-  const filteredVideos = annotated
-    .filter((v: any) => v._postDate >= cutoffDate)
+  // Step 4: Sort by view count (already filtered by created_at at DB level)
+  const filteredVideos = deduped
     .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
 
   // Step 6: Get product details for ALL filtered videos (so cache is complete)

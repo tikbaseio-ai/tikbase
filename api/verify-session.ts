@@ -4,7 +4,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
-import { upsertSubscriptionForUser } from './_lib/stripeSync';
+import { upsertSubscriptionForUser } from '../lib/stripeSync';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

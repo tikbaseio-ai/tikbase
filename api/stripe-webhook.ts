@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
-import { syncSubscriptionById, upsertSubscriptionForUser } from './_lib/stripeSync';
+import { syncSubscriptionById, upsertSubscriptionForUser } from '../lib/stripeSync';
 
 // Stripe signature verification requires the raw request body.
 export const config = {

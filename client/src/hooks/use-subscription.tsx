@@ -8,6 +8,7 @@ interface SubscriptionState {
   paywallFeature: string | null;
   closePaywall: () => void;
   markStripeOpened: () => void;
+  refreshSubscription: () => Promise<void>;
 }
 
 const SubscriptionContext = createContext<SubscriptionState>({
@@ -17,6 +18,7 @@ const SubscriptionContext = createContext<SubscriptionState>({
   paywallFeature: null,
   closePaywall: () => {},
   markStripeOpened: () => {},
+  refreshSubscription: async () => {},
 });
 
 // How long after opening Stripe to keep re-checking on tab focus (5 minutes)
@@ -29,8 +31,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [paywallVisible, setPaywallVisible] = useState(false);
   const stripeOpenedAt = useRef<number | null>(null);
 
-  const checkSubscription = (email: string) => {
-    return fetch(`/api/check-subscription?email=${encodeURIComponent(email)}`)
+  const checkSubscription = (userId: string) => {
+    return fetch(`/api/check-subscription?user_id=${encodeURIComponent(userId)}`)
       .then(r => r.json())
       .then(data => {
         setIsPaid(data.isPaid === true);
@@ -42,19 +44,23 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       });
   };
 
+  async function refreshSubscription() {
+    if (user?.id) await checkSubscription(user.id);
+  }
+
   // Initial check on login
   useEffect(() => {
-    if (!user?.email) {
+    if (!user?.id) {
       setIsPaid(false);
       setCheckingSubscription(false);
       return;
     }
-    checkSubscription(user.email);
-  }, [user?.email]);
+    checkSubscription(user.id);
+  }, [user?.id]);
 
   // Re-check when user returns to tab after visiting Stripe
   useEffect(() => {
-    if (!user?.email) return;
+    if (!user?.id) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
@@ -64,12 +70,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         stripeOpenedAt.current = null;
         return;
       }
-      checkSubscription(user.email!);
+      checkSubscription(user.id!);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [user?.email]);
+  }, [user?.id]);
 
   // Call this whenever a Stripe payment link is opened
   const markStripeOpened = () => {
@@ -90,7 +96,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   return (
     <SubscriptionContext.Provider value={{
-      isPaid, showPaywall, paywallVisible, paywallFeature, closePaywall, markStripeOpened,
+      isPaid, showPaywall, paywallVisible, paywallFeature, closePaywall, markStripeOpened, refreshSubscription,
     }}>
       {children}
     </SubscriptionContext.Provider>

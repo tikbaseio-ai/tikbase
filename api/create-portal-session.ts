@@ -1,30 +1,23 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
+import { getStoredSubscription } from './_lib/supabaseAdmin';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const { user_id } = req.body ?? {};
+    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+    const stored = await getStoredSubscription(user_id);
+    if (!stored) {
+      return res.status(404).json({ error: 'No subscription found for this user' });
+    }
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-    const customers = await stripe.customers.list({ email, limit: 100 });
-
-    if (customers.data.length === 0) {
-      return res.status(404).json({ error: 'No subscription found for this email' });
-    }
-
-    // Find the customer with an active subscription
-    let customerId = customers.data[0].id;
-    for (const customer of customers.data) {
-      const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'active', limit: 1 });
-      if (subs.data.length > 0) { customerId = customer.id; break; }
-    }
-
     const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: 'https://tikbase.io/#/billing',
+      customer: stored.stripe_customer_id,
+      return_url: 'https://tikbase.io/#/dashboard/billing',
     });
 
     return res.json({ url: session.url });

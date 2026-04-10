@@ -1,11 +1,7 @@
 import { useState } from 'react';
 import { useSubscription } from '@/hooks/use-subscription';
-import { X, Lock, TrendingUp, BarChart3, Zap, Tag } from 'lucide-react';
-
-const STRIPE_LINKS = {
-  monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
-  annual: 'https://buy.stripe.com/cNi3cufPm9ST5GR9h1fIs02',
-};
+import { useAuth } from '@/lib/auth';
+import { X, Lock, TrendingUp, BarChart3, Zap, Tag, Loader2 } from 'lucide-react';
 
 const FEATURE_MESSAGES: Record<string, string> = {
   top_videos: 'Unlock the top 100 trending TikTok Shop videos — see what\'s going viral right now',
@@ -19,15 +15,36 @@ const FEATURE_MESSAGES: Record<string, string> = {
 
 export function PaywallModal() {
   const { paywallVisible, paywallFeature, closePaywall, markStripeOpened } = useSubscription();
+  const { user } = useAuth();
   const [promoCode, setPromoCode] = useState('');
+  const [loadingPlan, setLoadingPlan] = useState<'monthly' | 'annual' | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleCheckout(plan: 'monthly' | 'annual') {
-    let link = STRIPE_LINKS[plan];
-    if (promoCode.trim()) {
-      link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
+  async function handleCheckout(plan: 'monthly' | 'annual') {
+    if (!user?.id || loadingPlan) return;
+    setLoadingPlan(plan);
+    setError(null);
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          user_id: user.id,
+          email: user.email,
+          ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to start checkout');
+      }
+      markStripeOpened();
+      window.location.href = data.url;
+    } catch (e: any) {
+      setError(e.message || 'Something went wrong');
+      setLoadingPlan(null);
     }
-    markStripeOpened();
-    window.open(link, '_blank', 'noopener,noreferrer');
   }
 
   if (!paywallVisible) return null;
@@ -90,18 +107,26 @@ export function PaywallModal() {
         <div className="space-y-3">
           <button
             onClick={() => handleCheckout('monthly')}
-            className="block w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors"
+            disabled={loadingPlan !== null}
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors disabled:opacity-60"
             style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
           >
+            {loadingPlan === 'monthly' && <Loader2 size={14} className="animate-spin" />}
             $44.99/month
           </button>
           <button
             onClick={() => handleCheckout('annual')}
-            className="block w-full py-3 rounded-lg border border-[#a3ff00] text-[#a3ff00] text-center font-semibold text-sm hover:bg-[#a3ff00]/10 transition-colors"
+            disabled={loadingPlan !== null}
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border border-[#a3ff00] text-[#a3ff00] text-center font-semibold text-sm hover:bg-[#a3ff00]/10 transition-colors disabled:opacity-60"
           >
+            {loadingPlan === 'annual' && <Loader2 size={14} className="animate-spin" />}
             $31.49/month (billed yearly) — Save 30%
           </button>
         </div>
+
+        {error && (
+          <p className="text-xs text-red-400 text-center mt-3">{error}</p>
+        )}
 
         <p className="text-[10px] text-zinc-600 text-center mt-4">
           Cancel anytime. Instant access after payment.

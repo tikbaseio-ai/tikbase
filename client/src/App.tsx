@@ -18,6 +18,7 @@ import SettingsPage from "@/pages/settings";
 import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
+import SubscriptionSuccessPage from "@/pages/subscription-success";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -66,6 +67,7 @@ function AppRouter() {
       <Route path="/" component={RootRedirect} />
       <Route path="/login" component={() => <PublicRoute component={LoginPage} />} />
       <Route path="/signup" component={() => <PublicRoute component={SignupPage} />} />
+      <Route path="/subscription-success" component={SubscriptionSuccessPage} />
       <Route path="/dashboard/:rest*" component={DashboardLayout} />
       <Route path="/dashboard" component={DashboardLayout} />
       <Route component={NotFound} />

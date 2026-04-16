@@ -206,7 +206,8 @@ export async function fetchTopVideos(
 
   const productIds = products.map((p: any) => p.product_id);
 
-  // Step 2: Get ALL videos for those products
+  // Step 2: Get ALL videos for those products (no date filter at DB level —
+  // we filter by the actual TikTok post date extracted from the snowflake ID)
   const batchSize = 150;
   let allVideos: any[] = [];
 
@@ -217,7 +218,6 @@ export async function fetchTopVideos(
     const { data: videos } = await query('product_videos', {
       select: '*',
       product_id: `in.${inList}`,
-      created_at: `gte.${cutoffDate.toISOString()}`,
       order: 'view_count.desc',
       limit: '5000',
       offset: '0',
@@ -226,7 +226,8 @@ export async function fetchTopVideos(
     if (videos) allVideos = allVideos.concat(videos);
   }
 
-  // Step 3: Deduplicate by video ID (same video can appear under different products or URL formats)
+  // Step 3: Deduplicate by video ID and filter by ACTUAL TikTok post date
+  // (extracted from the snowflake ID in the video URL, not the DB created_at)
   const seenVideoIds = new Set<string>();
   const deduped = allVideos.filter((v: any) => {
     const vidId = v.video_url?.match(/video\/(\d+)/)?.[1];
@@ -235,8 +236,13 @@ export async function fetchTopVideos(
     return true;
   });
 
-  // Step 4: Sort by view count (already filtered by created_at at DB level)
+  // Step 4: Filter by post date from snowflake ID, then sort by views
   const filteredVideos = deduped
+    .filter((v: any) => {
+      const postDate = extractPostDate(v.video_url);
+      if (!postDate) return false; // skip videos with unparseable URLs
+      return postDate >= cutoffDate;
+    })
     .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
 
   // Step 6: Get product details for ALL filtered videos (so cache is complete)

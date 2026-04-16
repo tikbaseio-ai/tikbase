@@ -271,33 +271,42 @@ async function phase1() {
         );
         await sleep(RATE_LIMIT_MS);
 
-        const videos = data?.data || data?.videos || data?.item_list || [];
-        if (!Array.isArray(videos)) continue;
+        // API returns search_item_list, each item wrapped in aweme_info
+        const rawItems = data?.search_item_list || data?.data || [];
+        if (!Array.isArray(rawItems)) continue;
 
-        for (const video of videos) {
+        for (const rawItem of rawItems) {
+          const video = rawItem?.aweme_info || rawItem;
           const viewCount =
-            video?.stats?.playCount ??
             video?.statistics?.play_count ??
+            video?.stats?.playCount ??
             video?.play_count ??
             0;
           if (viewCount < 1000) continue;
 
-          // Look for TikTok Shop product anchor
+          // Look for TikTok Shop product anchor.
+          // anchors[].extra is an ARRAY of objects, not a single object.
           const anchors = video?.anchors || video?.anchor_list || [];
-          const shopAnchor = anchors.find(
-            (a) => a?.extra?.type === 33 || a?.type === 33
-          );
-          if (!shopAnchor) continue;
-
-          const productId =
-            shopAnchor?.extra?.product_id ||
-            shopAnchor?.product_id ||
-            shopAnchor?.id;
+          let productId = null;
+          let shopExtra = null;
+          for (const anchor of anchors) {
+            const extras = Array.isArray(anchor?.extra) ? anchor.extra : [anchor?.extra].filter(Boolean);
+            const match = extras.find((e) => e?.type === 33);
+            if (match) {
+              productId = match.id || match.product_id;
+              shopExtra = match;
+              break;
+            }
+          }
+          // Fallback: check shop_product_url for product ID
+          if (!productId && video?.shop_product_url) {
+            const m = video.shop_product_url.match(/\/(\d{10,})/);
+            if (m) productId = m[1];
+          }
           if (!productId) continue;
 
           const videoUrl =
-            video?.video?.play_addr?.url_list?.[0] ||
-            `https://www.tiktok.com/@${video?.author?.unique_id || video?.author?.uniqueId || "user"}/video/${video?.id || video?.aweme_id}`;
+            `https://www.tiktok.com/@${video?.author?.unique_id || video?.author?.uniqueId || "user"}/video/${video?.aweme_id || video?.id}`;
 
           const videoRecord = {
             product_id: String(productId),
@@ -306,35 +315,28 @@ async function phase1() {
             author_name:
               video?.author?.nickname ||
               video?.author?.unique_id ||
-              video?.author?.uniqueId ||
               null,
             author_avatar_url:
+              video?.author?.avatar_medium?.url_list?.[0] ||
               video?.author?.avatar_thumb?.url_list?.[0] ||
-              video?.author?.avatarThumb ||
               null,
             cover_image_url:
               video?.video?.cover?.url_list?.[0] ||
-              video?.video?.originCover ||
+              video?.video?.origin_cover?.url_list?.[0] ||
               null,
           };
           videosToUpsert.push(videoRecord);
 
-          // Extract product info from anchor if available
-          const productTitle =
-            shopAnchor?.extra?.title ||
-            shopAnchor?.title ||
-            shopAnchor?.description ||
-            null;
-          if (productTitle) {
-            productsToUpsert.push({
-              product_id: String(productId),
-              title: productTitle,
-              niche_slug: nicheSlug,
-              niche_label: nicheLabel,
-              image_url: shopAnchor?.extra?.image_url || shopAnchor?.icon?.url_list?.[0] || null,
-              product_url: shopAnchor?.extra?.product_url || null,
-            });
-          }
+          // Extract product info from anchor
+          const productTitle = shopExtra?.keyword || shopExtra?.title || null;
+          productsToUpsert.push({
+            product_id: String(productId),
+            title: productTitle,
+            niche_slug: nicheSlug,
+            niche_label: nicheLabel,
+            image_url: video?.video?.cover?.url_list?.[0] || null,
+            product_url: video?.shop_product_url || `https://www.tiktok.com/shop/pdp/${productId}`,
+          });
         }
       } catch (err) {
         console.warn(`    [WARN] Query failed "${query}": ${err.message}`);
@@ -370,12 +372,25 @@ async function phase1() {
     );
 
     // Batch upsert in chunks of 500
-    for (let i = 0; i < dedupedVideos.length; i += 500) {
-      const chunk = dedupedVideos.slice(i, i + 500);
+    // product_videos has no unique constraint on video_url, so we check
+    // which URLs already exist and only insert new ones.
+    const allUrls = dedupedVideos.map((v) => v.video_url);
+    const existingUrls = new Set();
+    for (let i = 0; i < allUrls.length; i += 500) {
+      const batch = allUrls.slice(i, i + 500);
+      const { data: existing } = await supabase
+        .from("product_videos")
+        .select("video_url")
+        .in("video_url", batch);
+      if (existing) existing.forEach((r) => existingUrls.add(r.video_url));
+    }
+    const newVideos = dedupedVideos.filter((v) => !existingUrls.has(v.video_url));
+    for (let i = 0; i < newVideos.length; i += 500) {
+      const chunk = newVideos.slice(i, i + 500);
       const { error } = await supabase
         .from("product_videos")
-        .upsert(chunk, { onConflict: "video_url", ignoreDuplicates: false });
-      if (error) console.error("  [ERROR] Videos upsert:", error.message);
+        .insert(chunk);
+      if (error) console.error("  [ERROR] Videos insert:", error.message);
       else stats.phase1_videos += chunk.length;
     }
   }
@@ -414,40 +429,46 @@ async function phase2() {
             p?.product_id || p?.id || p?.item_id;
           if (!productId) continue;
 
+          // Extract price from product_price_info (shop search response shape)
+          const priceInfo = p?.product_price_info;
+          const salePrice = priceInfo?.min_price != null
+            ? parseFloat(String(priceInfo.min_price).replace(/[^0-9.]/g, '')) || null
+            : p?.sale_price != null ? parseFloat(p.sale_price) || null : null;
+          const originalPrice = priceInfo?.original_price != null
+            ? parseFloat(String(priceInfo.original_price).replace(/[^0-9.]/g, '')) || null
+            : p?.original_price != null ? parseFloat(p.original_price) || null : null;
+
+          // Extract sold count from sold_info
+          const soldText = p?.sold_info?.sold_count_str || "";
+          let soldCount = null;
+          if (soldText) {
+            const cleaned = soldText.replace(/[,+]/g, '');
+            const m = cleaned.match(/([\d.]+)\s*([KkMm])?/);
+            if (m) {
+              let n = parseFloat(m[1]);
+              if (m[2] && /[Kk]/.test(m[2])) n *= 1000;
+              if (m[2] && /[Mm]/.test(m[2])) n *= 1000000;
+              soldCount = Math.round(n);
+            }
+          }
+
           productsToUpsert.push({
             product_id: String(productId),
             title: p?.title || p?.name || null,
             niche_slug: nicheSlug,
             niche_label: nicheLabel,
             image_url:
+              p?.image?.url_list?.[0] ||
               p?.image_url ||
-              p?.cover?.url_list?.[0] ||
-              p?.images?.[0]?.url_list?.[0] ||
               null,
-            sale_price:
-              p?.sale_price != null
-                ? parseFloat(p.sale_price) || null
-                : p?.price?.sale_price != null
-                  ? parseFloat(p.price.sale_price) || null
-                  : null,
-            original_price:
-              p?.original_price != null
-                ? parseFloat(p.original_price) || null
-                : p?.price?.original_price != null
-                  ? parseFloat(p.price.original_price) || null
-                  : null,
-            sold_count: p?.sold_count ?? p?.sales ?? null,
-            rating: p?.rating ?? p?.star ?? null,
-            review_count: p?.review_count ?? null,
-            commission_rate: p?.commission_rate ?? null,
-            seller_name: p?.seller?.name || p?.shop?.name || null,
-            seller_id: p?.seller?.id || p?.shop?.id || null,
-            product_url:
-              p?.product_url ||
-              p?.url ||
-              (productId
-                ? `https://shop.tiktok.com/view/product/${productId}`
-                : null),
+            sale_price: salePrice,
+            original_price: originalPrice,
+            sold_count: soldCount ?? p?.sold_count ?? null,
+            rating: p?.rate_info?.star ? parseFloat(p.rate_info.star) : (p?.rating ?? null),
+            review_count: p?.rate_info?.review_count ?? p?.review_count ?? null,
+            seller_name: p?.seller_info?.name || p?.seller?.name || null,
+            seller_id: p?.seller_info?.seller_id || p?.seller?.id || null,
+            product_url: `https://www.tiktok.com/shop/pdp/${productId}`,
             updated_at: new Date().toISOString(),
           });
         }
@@ -576,28 +597,42 @@ async function phase4() {
     if ((failTracker[p.product_id] || 0) >= 3) continue;
 
     try {
+      // API expects a URL, not a bare product_id
+      const productUrl = `https://www.tiktok.com/shop/pdp/${p.product_id}`;
       const data = await apiFetch(
-        `/v1/tiktok/product?product_id=${p.product_id}`
+        `/v1/tiktok/product?url=${encodeURIComponent(productUrl)}`
       );
       await sleep(RATE_LIMIT_MS);
 
       const price =
-        data?.data?.product_base?.price?.min_sku_price ??
         data?.product_base?.price?.min_sku_price ??
+        data?.data?.product_base?.price?.min_sku_price ??
         null;
 
       if (price != null && parseFloat(price) > 0) {
+        const pb = data?.product_base;
+        const updateFields = {
+          sale_price: parseFloat(price),
+          updated_at: new Date().toISOString(),
+        };
+        // Also fill other fields if available
+        if (pb?.price?.original_price) {
+          const op = parseFloat(String(pb.price.original_price).replace(/[^0-9.]/g, ''));
+          if (op > 0) updateFields.original_price = op;
+        }
+        if (pb?.sold_count != null) updateFields.sold_count = pb.sold_count;
+        if (pb?.title && !p.title) updateFields.title = pb.title;
+        if (pb?.images?.[0]?.url_list?.[0]) updateFields.image_url = pb.images[0].url_list[0];
+        if (data?.seller?.name) updateFields.seller_name = data.seller.name;
+        if (data?.seller?.seller_id) updateFields.seller_id = data.seller.seller_id;
+
         const { error: updateErr } = await supabase
           .from("products")
-          .update({
-            sale_price: parseFloat(price),
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateFields)
           .eq("product_id", p.product_id);
 
         if (!updateErr) {
           filled++;
-          // Remove from fail tracker on success
           delete failTracker[p.product_id];
         }
       } else {

@@ -1,0 +1,30 @@
+name: Daily TikBase Refresh
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 6:00 AM UTC daily
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run daily refresh pipeline
+        env:
+          SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node pipeline/tikbase-daily-refresh.js

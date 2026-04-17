@@ -9,7 +9,7 @@ import {
 import { calculateProductMetrics, calculateMedianPrice, formatCompactNumber, getVideoPostDate, type ProductEstimates, type VideoForEstimate, type SnapshotData } from '@/lib/estimates';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
-import { Bookmark, ChevronLeft, ChevronRight, Star, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock } from 'lucide-react';
+import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock } from 'lucide-react';
 
 const SUPABASE_URL = 'https://ntapskfgodvynlfyulnv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50YXBza2Znb2R2eW5sZnl1bG52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MzEyNzUsImV4cCI6MjA4OTIwNzI3NX0.jOA-9kwBrOsfc8uqFFcyp0PajoKl9HQcRmaliYELBQo';
@@ -282,8 +282,6 @@ export default function ProductsPage() {
                   <SortHeader label="Units Sold" sortKeyVal="sold_count" />
 
                   <SortHeader label="Stock" sortKeyVal="stock_quantity" />
-                  <SortHeader label="Rating" sortKeyVal="rating" />
-                  <SortHeader label="Reviews" sortKeyVal="review_count" />
                   <SortHeader label="Price" sortKeyVal="sale_price" />
                   <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[160px]">Top Videos</th>
                   <th className="py-3 px-3 w-10"></th>
@@ -409,21 +407,6 @@ export default function ProductsPage() {
                       <td className="py-3 px-3 text-right">
                         <span className="font-mono text-xs text-muted-foreground">
                           {(product.stock_quantity || 0).toLocaleString()}
-                        </span>
-                      </td>
-
-                      {/* Rating */}
-                      <td className="py-3 px-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <Star size={10} className="text-yellow-500 fill-yellow-500" />
-                          <span className="font-mono text-xs text-foreground">{(product.rating || 0).toFixed(1)}</span>
-                        </div>
-                      </td>
-
-                      {/* Reviews */}
-                      <td className="py-3 px-3 text-right">
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {(product.review_count || 0).toLocaleString()}
                         </span>
                       </td>
 

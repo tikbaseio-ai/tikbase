@@ -319,7 +319,7 @@ export async function fetchTopVideos(
         product: isPlaceholder ? undefined : product,
       };
     })
-    .filter((v: VideoWithProduct) => v.product !== undefined);
+    .filter((v: VideoWithProduct) => v.product !== undefined && (v.product.sold_count ?? 0) > 0);
 
   // Cache the full enriched list
   const total = allVideosWithProducts.length;

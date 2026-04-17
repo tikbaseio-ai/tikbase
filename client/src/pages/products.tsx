@@ -69,11 +69,11 @@ export default function ProductsPage() {
     setPage(1);
 
     (async () => {
-      // Get all products for niche
-      // Handle 'all' category — fetch top 500 across all niches
+      // Get all products for niche — only products with actual sales data
+      // (products with 0/null sold_count aren't "trending" and shouldn't appear)
       const products = niche === 'all'
-        ? await fetchAll('products', `select=*&order=sold_count.desc.nullslast&limit=500`)
-        : await fetchAll('products', `select=*&niche_slug=eq.${niche}`);
+        ? await fetchAll('products', `select=*&sold_count=gt.0&order=sold_count.desc.nullslast&limit=500`)
+        : await fetchAll('products', `select=*&niche_slug=eq.${niche}&sold_count=gt.0`);
       if (cancelled) return;
       setAllProducts(products);
 

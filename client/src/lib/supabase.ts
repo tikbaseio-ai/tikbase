@@ -192,19 +192,29 @@ export async function fetchTopVideos(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  // Step 1: Get ALL product_ids for the niche
-  const productParams: Record<string, string> = {
-    select: 'product_id',
-    limit: '2000',
-  };
-  if (nicheSlug !== 'all') {
-    productParams.niche_slug = `eq.${nicheSlug}`;
+  // Step 1: Get ALL product_ids for the niche (paginate to get all, not just first 2000)
+  let allProductIds: string[] = [];
+  let productOffset = 0;
+  const productPageSize = 2000;
+  while (true) {
+    const productParams: Record<string, string> = {
+      select: 'product_id',
+      limit: String(productPageSize),
+      offset: String(productOffset),
+    };
+    if (nicheSlug !== 'all') {
+      productParams.niche_slug = `eq.${nicheSlug}`;
+    }
+    const { data: products } = await query('products', productParams);
+    if (!products || products.length === 0) break;
+    allProductIds = allProductIds.concat(products.map((p: any) => p.product_id));
+    if (products.length < productPageSize) break; // last page
+    productOffset += productPageSize;
   }
-  const { data: products } = await query('products', productParams);
 
-  if (!products || products.length === 0) return { videos: [], total: 0 };
+  if (allProductIds.length === 0) return { videos: [], total: 0 };
 
-  const productIds = products.map((p: any) => p.product_id);
+  const productIds = allProductIds;
 
   // Step 2: Get ALL videos for those products (no date filter at DB level —
   // we filter by the actual TikTok post date extracted from the snowflake ID)

@@ -234,17 +234,21 @@ export function calculateProductMetrics(
       // Cross-check against lifetime sold_count:
       // Period sales can't exceed total sold, and for short periods
       // shouldn't exceed a reasonable fraction of total
-      const maxFraction = periodDays <= 7 ? 0.25
-        : periodDays <= 14 ? 0.35
-        : periodDays <= 30 ? 0.5
-        : periodDays <= 90 ? 0.75
-        : 1.0;
+      const maxFraction = periodDays <= 7 ? 0.15
+        : periodDays <= 14 ? 0.25
+        : periodDays <= 30 ? 0.4
+        : periodDays <= 90 ? 0.65
+        : 0.85;
       velocityEstimate = Math.min(velocityEstimate, Math.round(soldCount * maxFraction));
 
       // Also compute the simple velocity ratio method as a floor
-      const simpleVelocity = totalViews > 0
+      // Apply the same period cap — without it, products where all videos
+      // are from the current period get velocityRatio=1.0 which produces
+      // absurd numbers (150% of lifetime sales in a single week).
+      let simpleVelocity = totalViews > 0
         ? Math.round(soldCount * (periodViews / totalViews) * recency)
         : 0;
+      simpleVelocity = Math.min(simpleVelocity, Math.round(soldCount * maxFraction));
 
       // Final estimate: use the highest of all available methods
       // This ensures longer periods never show less than shorter periods

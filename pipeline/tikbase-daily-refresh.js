@@ -438,19 +438,8 @@ async function phase2() {
             ? parseFloat(String(priceInfo.original_price).replace(/[^0-9.]/g, '')) || null
             : p?.original_price != null ? parseFloat(p.original_price) || null : null;
 
-          // Extract sold count from sold_info
-          const soldText = p?.sold_info?.sold_count_str || "";
-          let soldCount = null;
-          if (soldText) {
-            const cleaned = soldText.replace(/[,+]/g, '');
-            const m = cleaned.match(/([\d.]+)\s*([KkMm])?/);
-            if (m) {
-              let n = parseFloat(m[1]);
-              if (m[2] && /[Kk]/.test(m[2])) n *= 1000;
-              if (m[2] && /[Mm]/.test(m[2])) n *= 1000000;
-              soldCount = Math.round(n);
-            }
-          }
+          // Extract sold count from sold_info — API returns it as a number directly
+          const soldCount = p?.sold_info?.sold_count ?? p?.sold_count ?? null;
 
           productsToUpsert.push({
             product_id: String(productId),
@@ -578,22 +567,21 @@ async function phase4() {
     }
   }
 
-  // Fetch products with missing prices — limit to 200 per run to stay
-  // within GitHub Actions timeout (Phase 4 makes one API call per product
-  // with 250ms delay = ~50s per 200 products, vs ~4 min for 1000).
-  const MAX_PRICE_LOOKUPS = 200;
+  // Fetch products missing price OR sold_count — limit to 200 per run to stay
+  // within GitHub Actions timeout (one API call per product with 250ms delay).
+  const MAX_LOOKUPS = 200;
   const { data: products, error } = await supabase
     .from("products")
-    .select("product_id")
-    .or("sale_price.is.null,sale_price.eq.0")
-    .limit(MAX_PRICE_LOOKUPS);
+    .select("product_id, sale_price, sold_count")
+    .or("sale_price.is.null,sale_price.eq.0,sold_count.is.null,sold_count.eq.0")
+    .limit(MAX_LOOKUPS);
 
   if (error) {
-    console.error("  [ERROR] Fetching missing-price products:", error.message);
+    console.error("  [ERROR] Fetching products needing enrichment:", error.message);
     return;
   }
 
-  console.log(`  Found ${products?.length || 0} products with missing prices (max ${MAX_PRICE_LOOKUPS} per run)`);
+  console.log(`  Found ${products?.length || 0} products needing price/sold data (max ${MAX_LOOKUPS} per run)`);
 
   let filled = 0;
   for (const p of products || []) {
@@ -613,23 +601,31 @@ async function phase4() {
         data?.data?.product_base?.price?.min_sku_price ??
         null;
 
-      if (price != null && parseFloat(price) > 0) {
-        const pb = data?.product_base;
-        const updateFields = {
-          sale_price: parseFloat(price),
-          updated_at: new Date().toISOString(),
-        };
-        // Also fill other fields if available
-        if (pb?.price?.original_price) {
-          const op = parseFloat(String(pb.price.original_price).replace(/[^0-9.]/g, ''));
-          if (op > 0) updateFields.original_price = op;
-        }
-        if (pb?.sold_count != null) updateFields.sold_count = pb.sold_count;
-        if (pb?.title && !p.title) updateFields.title = pb.title;
-        if (pb?.images?.[0]?.url_list?.[0]) updateFields.image_url = pb.images[0].url_list[0];
-        if (data?.seller?.name) updateFields.seller_name = data.seller.name;
-        if (data?.seller?.seller_id) updateFields.seller_id = data.seller.seller_id;
+      const pb = data?.product_base;
+      const updateFields = { updated_at: new Date().toISOString() };
+      let hasUpdate = false;
 
+      // Fill price if available
+      if (price != null && parseFloat(price) > 0) {
+        updateFields.sale_price = parseFloat(price);
+        hasUpdate = true;
+      }
+      if (pb?.price?.original_price) {
+        const op = parseFloat(String(pb.price.original_price).replace(/[^0-9.]/g, ''));
+        if (op > 0) { updateFields.original_price = op; hasUpdate = true; }
+      }
+      // Fill sold_count if available
+      if (pb?.sold_count != null && pb.sold_count > 0) {
+        updateFields.sold_count = pb.sold_count;
+        hasUpdate = true;
+      }
+      // Fill other fields
+      if (pb?.title) { updateFields.title = pb.title; hasUpdate = true; }
+      if (pb?.images?.[0]?.url_list?.[0]) { updateFields.image_url = pb.images[0].url_list[0]; hasUpdate = true; }
+      if (data?.seller?.name) { updateFields.seller_name = data.seller.name; hasUpdate = true; }
+      if (data?.seller?.seller_id) { updateFields.seller_id = data.seller.seller_id; hasUpdate = true; }
+
+      if (hasUpdate) {
         const { error: updateErr } = await supabase
           .from("products")
           .update(updateFields)

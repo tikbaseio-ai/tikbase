@@ -578,18 +578,22 @@ async function phase4() {
     }
   }
 
-  // Fetch products with missing prices
+  // Fetch products with missing prices — limit to 200 per run to stay
+  // within GitHub Actions timeout (Phase 4 makes one API call per product
+  // with 250ms delay = ~50s per 200 products, vs ~4 min for 1000).
+  const MAX_PRICE_LOOKUPS = 200;
   const { data: products, error } = await supabase
     .from("products")
     .select("product_id")
-    .or("sale_price.is.null,sale_price.eq.0");
+    .or("sale_price.is.null,sale_price.eq.0")
+    .limit(MAX_PRICE_LOOKUPS);
 
   if (error) {
     console.error("  [ERROR] Fetching missing-price products:", error.message);
     return;
   }
 
-  console.log(`  Found ${products?.length || 0} products with missing prices`);
+  console.log(`  Found ${products?.length || 0} products with missing prices (max ${MAX_PRICE_LOOKUPS} per run)`);
 
   let filled = 0;
   for (const p of products || []) {

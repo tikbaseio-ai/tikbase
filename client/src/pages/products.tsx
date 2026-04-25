@@ -6,35 +6,37 @@ import {
   type Product,
   type ProductVideo,
 } from '@/lib/supabase';
-import { calculateProductMetrics, calculateMedianPrice, formatCompactNumber, getVideoPostDate, type ProductEstimates, type VideoForEstimate, type SnapshotData } from '@/lib/estimates';
+import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
 import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock } from 'lucide-react';
 
-const SUPABASE_URL = 'https://ntapskfgodvynlfyulnv.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50YXBza2Znb2R2eW5sZnl1bG52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MzEyNzUsImV4cCI6MjA4OTIwNzI3NX0.jOA-9kwBrOsfc8uqFFcyp0PajoKl9HQcRmaliYELBQo';
-const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` };
-
 interface EnrichedProduct extends Product {
   metrics: ProductEstimates;
-  videos: ProductVideo[];
+  topVideos: { video_url: string; view_count: number; cover_image_url: string }[];
 }
 
-type SortKey = 'periodViews' | 'sold_count' | 'estRevenue' | 'stock_quantity' | 'rating' | 'review_count' | 'sale_price';
+type SortKey = 'periodViews' | 'sold_count' | 'estRevenue' | 'stock_quantity' | 'sale_price';
 type SortDir = 'asc' | 'desc';
 
-async function fetchAll(table: string, params: string): Promise<any[]> {
-  let all: any[] = [];
-  let offset = 0;
-  while (true) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}&limit=1000&offset=${offset}`, { headers });
-    const data = await res.json();
-    if (!Array.isArray(data) || !data.length) break;
-    all = all.concat(data);
-    if (data.length < 1000) break;
-    offset += 1000;
-  }
-  return all;
+// Client-side cache for product API responses
+const productCache = new Map<string, { data: any; timestamp: number }>();
+const PRODUCT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+async function fetchProducts(
+  niche: string, days: number, page: number, limit: number, sort: string, dir: string
+): Promise<{ products: EnrichedProduct[]; total: number }> {
+  const cacheKey = `${niche}:${days}:${page}:${limit}:${sort}:${dir}`;
+  const cached = productCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < PRODUCT_CACHE_TTL) return cached.data;
+
+  const params = new URLSearchParams({ niche, days: String(days), page: String(page), limit: String(limit), sort, dir });
+  const res = await fetch(`/api/top-products?${params}`);
+  if (!res.ok) throw new Error('Failed to fetch products');
+  const data = await res.json();
+  const result = { products: data.products || [], total: data.total || 0 };
+  productCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  return result;
 }
 
 function formatRevenue(n: number): string {
@@ -49,11 +51,9 @@ function formatRevenue(n: number): string {
 export default function ProductsPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
   const { isPaid, showPaywall } = useSubscription();
-  // Default to 2 Weeks always, upgrade to 1 Month once we confirm paid status
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[1]); // "2 Weeks"
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [allVideos, setAllVideos] = useState<Record<string, ProductVideo[]>>({});
-  const [snapshotMap, setSnapshotMap] = useState<Record<string, SnapshotData[]>>({});
+  const [pageProducts, setPageProducts] = useState<EnrichedProduct[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('estRevenue');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -61,55 +61,7 @@ export default function ProductsPage() {
   const { isProductBookmarked, toggleProductBookmark } = useBookmarks();
 
   const limit = 50;
-
-  // Fetch products + ALL their videos when niche changes
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setPage(1);
-
-    (async () => {
-      // Get all products for niche — only products with actual sales data
-      // (products with 0/null sold_count aren't "trending" and shouldn't appear)
-      const products = niche === 'all'
-        ? await fetchAll('products', `select=*&sold_count=gt.0&order=sold_count.desc.nullslast&limit=500`)
-        : await fetchAll('products', `select=*&niche_slug=eq.${niche}&sold_count=gt.0`);
-      if (cancelled) return;
-      setAllProducts(products);
-
-      // Get ALL videos + snapshots for these products
-      const pids = products.map((p: any) => p.product_id);
-      const videoMap: Record<string, ProductVideo[]> = {};
-      const snapMap: Record<string, SnapshotData[]> = {};
-      const batchSize = 150;
-
-      for (let i = 0; i < pids.length; i += batchSize) {
-        const batch = pids.slice(i, i + batchSize);
-        const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;;
-        
-        // Fetch videos
-        const vids = await fetchAll('product_videos', `select=*&product_id=in.${inList}&order=view_count.desc`);
-        for (const v of vids) {
-          if (!videoMap[v.product_id]) videoMap[v.product_id] = [];
-          videoMap[v.product_id].push(v);
-        }
-        
-        // Fetch snapshots
-        const snaps = await fetchAll('product_snapshots', `select=product_id,sold_count,sale_price,snapshot_date&product_id=in.${inList}&order=snapshot_date.asc`);
-        for (const s of snaps) {
-          if (!snapMap[s.product_id]) snapMap[s.product_id] = [];
-          snapMap[s.product_id].push(s);
-        }
-      }
-
-      if (cancelled) return;
-      setAllVideos(videoMap);
-      setSnapshotMap(snapMap);
-      setLoading(false);
-    })();
-
-    return () => { cancelled = true; };
-  }, [niche]);
+  const totalPages = Math.ceil(total / limit);
 
   // Free users default to "1 Year" tab and page 3
   useEffect(() => {
@@ -122,52 +74,30 @@ export default function ProductsPage() {
 
   useEffect(() => { setPage(!isPaid ? 3 : 1); }, [timeframe, sortKey, sortDir, isPaid]);
 
-  // Compute metrics for all products based on current timeframe
-  const enrichedProducts = useMemo(() => {
-    // Calculate median price for this niche (used as fallback for products without price)
-    const medianPrice = calculateMedianPrice(allProducts as any, niche);
-
-    return allProducts
-      .filter(p => (p.sold_count || 0) > 0)
-      .map(p => {
-        const videos = allVideos[p.product_id] || [];
-        const videoData: VideoForEstimate[] = videos.map(v => ({
-          video_url: v.video_url,
-          view_count: v.view_count,
-        }));
-        const productSnapshots = snapshotMap[p.product_id] || [];
-        const metrics = calculateProductMetrics(
-          { product_id: p.product_id, sold_count: p.sold_count, review_count: p.review_count, sale_price: p.sale_price, niche_slug: (p as any).niche_slug },
-          videoData,
-          timeframe.days,
-          medianPrice,
-          productSnapshots
-        );
-        return { ...p, metrics, videos } as EnrichedProduct;
+  // Fetch products from server-side endpoint
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchProducts(niche, timeframe.days, page, limit, sortKey, sortDir)
+      .then(res => {
+        if (!cancelled) {
+          setPageProducts(res.products);
+          setTotal(res.total);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
       });
-  }, [allProducts, allVideos, snapshotMap, timeframe, niche]);
+    return () => { cancelled = true; };
+  }, [niche, timeframe, page, sortKey, sortDir]);
 
-  // Sort
-  const sortedProducts = useMemo(() => {
-    return [...enrichedProducts].sort((a, b) => {
-      let aVal: number, bVal: number;
-      switch (sortKey) {
-        case 'periodViews': aVal = a.metrics.periodViews; bVal = b.metrics.periodViews; break;
-        case 'sold_count': aVal = a.metrics.estPeriodUnitsSold; bVal = b.metrics.estPeriodUnitsSold; break;
-        case 'estRevenue': aVal = a.metrics.estRevenue; bVal = b.metrics.estRevenue; break;
-
-        case 'stock_quantity': aVal = a.stock_quantity || 0; bVal = b.stock_quantity || 0; break;
-        case 'rating': aVal = a.rating || 0; bVal = b.rating || 0; break;
-        case 'review_count': aVal = a.review_count || 0; bVal = b.review_count || 0; break;
-        case 'sale_price': aVal = a.sale_price || 0; bVal = b.sale_price || 0; break;
-        default: aVal = 0; bVal = 0;
-      }
-      return sortDir === 'desc' ? bVal - aVal : aVal - bVal;
+  // Pre-fetch other timeframes for instant tab switching
+  useEffect(() => {
+    TIMEFRAMES.filter(t => t.days !== timeframe.days).forEach(t => {
+      fetchProducts(niche, t.days, 1, limit, sortKey, sortDir).catch(() => {});
     });
-  }, [enrichedProducts, sortKey, sortDir]);
-
-  const totalPages = Math.ceil(sortedProducts.length / limit);
-  const pageProducts = sortedProducts.slice((page - 1) * limit, page * limit);
+  }, [niche]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -235,7 +165,7 @@ export default function ProductsPage() {
         </div>
 
         <span className="text-xs text-muted-foreground font-mono ml-auto">
-          {loading ? '...' : `${sortedProducts.length.toLocaleString()} products`}
+          {loading ? '...' : `${total.toLocaleString()} products`}
         </span>
       </div>
 
@@ -263,7 +193,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {!loading && sortedProducts.length === 0 && (
+      {!loading && total === 0 && (
         <div className="text-center py-20 text-muted-foreground">
           <p className="text-sm">No products found for this niche/timeframe.</p>
         </div>
@@ -296,10 +226,8 @@ export default function ProductsPage() {
                   const price = product.sale_price || 0;
                   const bookmarked = isProductBookmarked(product.product_id);
 
-                  // Always show the top 5 videos by views (not filtered by timeframe)
-                  const displayVideos = [...product.videos]
-                    .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
-                    .slice(0, 5);
+                  // Top 5 videos pre-sorted by server
+                  const displayVideos = product.topVideos || [];
 
                   if (isRowLocked) {
                     return (
@@ -355,7 +283,7 @@ export default function ProductsPage() {
 
                       {/* Period Views — the ranking signal */}
                       <td className="py-3 px-3 text-right">
-                        <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this period\n' + m.totalViews.toLocaleString() + ' total views from ' + product.videos.length + ' videos all-time'}>
+                        <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this period\n' + m.totalViews.toLocaleString() + ' total views from ' + (product.topVideos || []).length + ' videos all-time'}>
                           <span className="font-mono text-xs font-semibold text-foreground">
                             {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (
                               m.totalViews > 0 ? <span className="text-zinc-500">{formatCompactNumber(m.totalViews)}</span> : <span className="text-zinc-500 font-normal">--</span>
@@ -363,10 +291,10 @@ export default function ProductsPage() {
                           </span>
                           <div className="text-[9px] font-mono mt-0.5">
                             {m.periodVideoCount > 0 
-                              ? <span className="text-zinc-500">{m.periodVideoCount} recent / {product.videos.length} total</span>
-                              : <span className="text-zinc-500">{product.videos.length} video{product.videos.length !== 1 ? 's' : ''}</span>
+                              ? <span className="text-zinc-500">{m.periodVideoCount} recent / {(product.topVideos || []).length} total</span>
+                              : <span className="text-zinc-500">{(product.topVideos || []).length} video{(product.topVideos || []).length !== 1 ? 's' : ''}</span>
                             }
-                            {product.videos.length < 5 && product.videos.length > 0 && (
+                            {(product.topVideos || []).length < 5 && (product.topVideos || []).length > 0 && (
                               <div className="text-[8px] text-amber-500/80 mt-0.5">limited data</div>
                             )}
                           </div>
@@ -421,7 +349,7 @@ export default function ProductsPage() {
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-1">
                           {displayVideos.slice(0, 5).map(vid => (
-                            <a key={vid.id} href={vid.video_url} target="_blank" rel="noopener noreferrer" className="block flex-shrink-0 relative group">
+                            <a key={vid.video_url} href={vid.video_url} target="_blank" rel="noopener noreferrer" className="block flex-shrink-0 relative group">
                               <div className="w-8 h-8 rounded border border-border overflow-hidden bg-zinc-800 hover:border-primary/50 transition-colors">
                                 {vid.cover_image_url ? (
                                   <img src={vid.cover_image_url} alt="" className="w-full h-full object-cover" loading="lazy"
@@ -435,7 +363,7 @@ export default function ProductsPage() {
                               </div>
                             </a>
                           ))}
-                          {product.videos.length === 0 && <span className="text-[10px] text-muted-foreground">--</span>}
+                          {(product.topVideos || []).length === 0 && <span className="text-[10px] text-muted-foreground">--</span>}
                         </div>
                       </td>
 

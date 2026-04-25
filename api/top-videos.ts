@@ -115,7 +115,7 @@ async function computeTopVideos(nicheSlug: string, days: number): Promise<any[]>
     const batch = videoProductIds.slice(i, i + 200);
     const { data } = await supabase
       .from('products')
-      .select('*')
+      .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, product_url')
       .in('product_id', batch);
     if (data) data.forEach((p: any) => { productsMap[p.product_id] = p; });
   }
@@ -127,7 +127,16 @@ async function computeTopVideos(nicheSlug: string, days: number): Promise<any[]>
       if (!product) return null;
       if (product.title?.includes('Discovered Videos')) return null;
       if ((product.sold_count ?? 0) <= 0) return null;
-      return { ...v, product };
+      return {
+        product_id: v.product_id,
+        video_url: v.video_url,
+        view_count: v.view_count,
+        author_name: v.author_name,
+        author_avatar_url: v.author_avatar_url,
+        cover_image_url: v.cover_image_url,
+        created_at: v.created_at,
+        product,
+      };
     })
     .filter(Boolean);
 

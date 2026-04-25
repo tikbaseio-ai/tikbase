@@ -56,6 +56,14 @@ export default function VideosPage() {
     return () => { cancelled = true; };
   }, [niche, timeframe, page]);
 
+  // Pre-fetch other timeframes in the background so tab switching is instant
+  useEffect(() => {
+    const otherTimeframes = TIMEFRAMES.filter(t => t.days !== timeframe.days);
+    otherTimeframes.forEach(t => {
+      fetchTopVideos(niche, t.days, 1, limit).catch(() => {});
+    });
+  }, [niche]);
+
   const nicheLabel = NICHES.find(n => n.slug === niche)?.label || niche;
 
   return (

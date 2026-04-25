@@ -8,7 +8,7 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 // Simple in-memory cache for expensive queries
 const queryCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes (data changes daily, no need to refetch often)
 
 function getCached<T>(key: string): T | null {
   const entry = queryCache.get(key);

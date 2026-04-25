@@ -192,23 +192,30 @@ export async function fetchTopVideos(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  // Step 1: Get ALL product_ids for the niche (paginate to get all, not just first 2000)
+  // Step 1: Get product_ids for the niche — only products with sold_count > 0.
+  // For "All Categories", fetch top products by sold_count (capped at 3000 to
+  // keep the query fast). Per-niche queries fetch everything.
   let allProductIds: string[] = [];
+  const isAll = nicheSlug === 'all';
   let productOffset = 0;
-  const productPageSize = 2000;
+  const productPageSize = isAll ? 3000 : 2000;
   while (true) {
     const productParams: Record<string, string> = {
       select: 'product_id',
       limit: String(productPageSize),
       offset: String(productOffset),
+      sold_count: 'gt.0',
+      order: 'sold_count.desc',
     };
-    if (nicheSlug !== 'all') {
+    if (!isAll) {
       productParams.niche_slug = `eq.${nicheSlug}`;
     }
     const { data: products } = await query('products', productParams);
     if (!products || products.length === 0) break;
     allProductIds = allProductIds.concat(products.map((p: any) => p.product_id));
-    if (products.length < productPageSize) break; // last page
+    if (products.length < productPageSize) break;
+    // For "All Categories", stop after first page (top 3000 by sales)
+    if (isAll) break;
     productOffset += productPageSize;
   }
 
@@ -269,42 +276,6 @@ export async function fetchTopVideos(
       });
       if (prods) {
         prods.forEach((p: any) => { productsMap[p.product_id] = p as Product; });
-      }
-    }
-  }
-
-  // For products with sold_count = 0, estimate sales from stock_quantity deltas in snapshots
-  const zeroSoldProductIds = allVideoProductIds.filter(
-    (id: string) => productsMap[id] && productsMap[id].sold_count === 0
-  );
-
-  if (zeroSoldProductIds.length > 0) {
-    for (let i = 0; i < zeroSoldProductIds.length; i += batchSize) {
-      const batch = zeroSoldProductIds.slice(i, i + batchSize);
-      const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
-      const { data: snaps } = await query('product_snapshots', {
-        select: 'product_id,stock_quantity,snapshot_date',
-        product_id: `in.${inList}`,
-        order: 'snapshot_date.asc',
-        limit: '5000',
-      });
-      if (snaps) {
-        const snapsByProduct: Record<string, any[]> = {};
-        for (const s of snaps) {
-          if (!snapsByProduct[s.product_id]) snapsByProduct[s.product_id] = [];
-          snapsByProduct[s.product_id].push(s);
-        }
-        for (const [pid, productSnaps] of Object.entries(snapsByProduct)) {
-          if (productSnaps.length >= 2) {
-            const sorted = productSnaps.sort((a: any, b: any) => a.snapshot_date.localeCompare(b.snapshot_date));
-            const firstStock = sorted[0].stock_quantity || 0;
-            const lastStock = sorted[sorted.length - 1].stock_quantity || 0;
-            const estimatedSold = Math.max(0, firstStock - lastStock);
-            if (estimatedSold > 0 && productsMap[pid]) {
-              productsMap[pid] = { ...productsMap[pid], sold_count: estimatedSold };
-            }
-          }
-        }
       }
     }
   }

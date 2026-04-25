@@ -192,59 +192,70 @@ export async function fetchTopVideos(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  // Step 1: Get product_ids for the niche — only products with sold_count > 0.
-  // For "All Categories", fetch top products by sold_count (capped at 3000 to
-  // keep the query fast). Per-niche queries fetch everything.
-  let allProductIds: string[] = [];
-  const isAll = nicheSlug === 'all';
-  let productOffset = 0;
-  const productPageSize = isAll ? 3000 : 2000;
-  while (true) {
-    const productParams: Record<string, string> = {
-      select: 'product_id',
-      limit: String(productPageSize),
-      offset: String(productOffset),
-      sold_count: 'gt.0',
-      order: 'sold_count.desc',
-    };
-    if (!isAll) {
-      productParams.niche_slug = `eq.${nicheSlug}`;
-    }
-    const { data: products } = await query('products', productParams);
-    if (!products || products.length === 0) break;
-    allProductIds = allProductIds.concat(products.map((p: any) => p.product_id));
-    if (products.length < productPageSize) break;
-    // For "All Categories", stop after first page (top 3000 by sales)
-    if (isAll) break;
-    productOffset += productPageSize;
-  }
-
-  if (allProductIds.length === 0) return { videos: [], total: 0 };
-
-  const productIds = allProductIds;
-
-  // Step 2: Get ALL videos for those products (no date filter at DB level —
-  // we filter by the actual TikTok post date extracted from the snowflake ID)
+  // Step 1: Fetch videos directly, using created_at as a rough pre-filter to
+  // reduce data volume. We extend the window by 30 days to avoid missing videos
+  // that were scraped late, then do the precise snowflake-date filter client-side.
+  //
+  // For per-niche queries, we first get product_ids for that niche, then fetch
+  // their videos. For "All Categories", we fetch all recent videos at once.
   const batchSize = 150;
   let allVideos: any[] = [];
 
-  for (let i = 0; i < productIds.length; i += batchSize) {
-    const batch = productIds.slice(i, i + batchSize);
-    const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
+  // Use created_at as a loose pre-filter: extend the window generously
+  const looseCreatedCutoff = new Date(cutoffDate.getTime() - 90 * 86400000).toISOString();
 
-    const { data: videos } = await query('product_videos', {
-      select: '*',
-      product_id: `in.${inList}`,
-      order: 'view_count.desc',
-      limit: '5000',
-      offset: '0',
-    });
+  if (nicheSlug === 'all') {
+    // All Categories: fetch recent videos directly (no product_id filter)
+    let vidOffset = 0;
+    while (true) {
+      const { data: videos } = await query('product_videos', {
+        select: '*',
+        created_at: `gte.${looseCreatedCutoff}`,
+        order: 'view_count.desc',
+        limit: '1000',
+        offset: String(vidOffset),
+      });
+      if (!videos || videos.length === 0) break;
+      allVideos = allVideos.concat(videos);
+      if (videos.length < 1000) break;
+      vidOffset += 1000;
+      // Cap at 10,000 videos to avoid infinite loading
+      if (allVideos.length >= 10000) break;
+    }
+  } else {
+    // Per-niche: get product_ids first, then fetch their videos
+    let allProductIds: string[] = [];
+    let productOffset = 0;
+    while (true) {
+      const productParams: Record<string, string> = {
+        select: 'product_id',
+        limit: '1000',
+        offset: String(productOffset),
+        niche_slug: `eq.${nicheSlug}`,
+        sold_count: 'gt.0',
+      };
+      const { data: products } = await query('products', productParams);
+      if (!products || products.length === 0) break;
+      allProductIds = allProductIds.concat(products.map((p: any) => p.product_id));
+      if (products.length < 1000) break;
+      productOffset += 1000;
+    }
 
-    if (videos) allVideos = allVideos.concat(videos);
+    for (let i = 0; i < allProductIds.length; i += batchSize) {
+      const batch = allProductIds.slice(i, i + batchSize);
+      const inList = `(${batch.map((id: string) => `"${id}"`).join(',')})`;
+      const { data: videos } = await query('product_videos', {
+        select: '*',
+        product_id: `in.${inList}`,
+        order: 'view_count.desc',
+        limit: '5000',
+        offset: '0',
+      });
+      if (videos) allVideos = allVideos.concat(videos);
+    }
   }
 
-  // Step 3: Deduplicate by video ID and filter by ACTUAL TikTok post date
-  // (extracted from the snowflake ID in the video URL, not the DB created_at)
+  // Step 2: Deduplicate by video ID
   const seenVideoIds = new Set<string>();
   const deduped = allVideos.filter((v: any) => {
     const vidId = v.video_url?.match(/video\/(\d+)/)?.[1];
@@ -253,16 +264,16 @@ export async function fetchTopVideos(
     return true;
   });
 
-  // Step 4: Filter by post date from snowflake ID, then sort by views
+  // Step 3: Filter by ACTUAL TikTok post date (snowflake ID), then sort by views
   const filteredVideos = deduped
     .filter((v: any) => {
       const postDate = extractPostDate(v.video_url);
-      if (!postDate) return false; // skip videos with unparseable URLs
+      if (!postDate) return false;
       return postDate >= cutoffDate;
     })
     .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
 
-  // Step 6: Get product details for ALL filtered videos (so cache is complete)
+  // Step 4: Get product details for the filtered videos
   const allVideoProductIds = [...new Set(filteredVideos.map((v: any) => v.product_id))] as string[];
 
   let productsMap: Record<string, Product> = {};

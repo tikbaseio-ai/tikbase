@@ -122,7 +122,6 @@ export default function ProductsPage() {
 
   return (
     <div className="p-6" data-testid="products-page">
-      <LoadingBar loading={loading} />
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">
@@ -180,20 +179,7 @@ export default function ProductsPage() {
         </span>
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="divide-y divide-border">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="h-16 px-4 flex items-center gap-4 animate-pulse">
-                <div className="w-6 h-4 bg-muted rounded" />
-                <div className="w-10 h-10 bg-muted rounded" />
-                <div className="flex-1"><div className="h-3 bg-muted rounded w-48" /></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {loading && <LoadingBar loading={loading} />}
 
       {!loading && total === 0 && (
         <div className="text-center py-20 text-muted-foreground">

@@ -69,7 +69,6 @@ export default function VideosPage() {
 
   return (
     <div className="p-6" data-testid="videos-page">
-      <LoadingBar loading={loading} />
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Videos</h1>
@@ -139,20 +138,7 @@ export default function VideosPage() {
         </span>
       </div>
 
-      {/* Loading skeleton */}
-      {loading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="rounded-lg border border-border bg-card animate-pulse">
-              <div className="aspect-[9/16] max-h-[280px] bg-muted rounded-t-lg" />
-              <div className="p-3 space-y-2">
-                <div className="h-3 bg-muted rounded w-2/3" />
-                <div className="h-3 bg-muted rounded w-1/2" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {loading && <LoadingBar loading={loading} />}
 
       {/* Video grid */}
       {!loading && videos.length === 0 && (

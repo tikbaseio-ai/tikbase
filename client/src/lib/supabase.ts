@@ -192,25 +192,23 @@ export async function fetchTopVideos(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  // Step 1: Fetch videos directly, using created_at as a rough pre-filter to
-  // reduce data volume. We extend the window by 30 days to avoid missing videos
-  // that were scraped late, then do the precise snowflake-date filter client-side.
+  // Step 1: Fetch ALL videos from the database, paginated.
+  // We can't use created_at as a pre-filter because created_at is when the
+  // video was scraped, not when it was posted. A video posted yesterday could
+  // have been scraped a month ago, and vice versa. The snowflake filter in
+  // step 3 does the real date filtering.
   //
-  // For per-niche queries, we first get product_ids for that niche, then fetch
-  // their videos. For "All Categories", we fetch all recent videos at once.
+  // For per-niche queries, we first get product_ids for that niche to reduce
+  // the video set. For "All Categories", we fetch everything.
   const batchSize = 150;
   let allVideos: any[] = [];
 
-  // Use created_at as a loose pre-filter: extend the window generously
-  const looseCreatedCutoff = new Date(cutoffDate.getTime() - 90 * 86400000).toISOString();
-
   if (nicheSlug === 'all') {
-    // All Categories: fetch recent videos directly (no product_id filter)
+    // All Categories: fetch ALL videos sorted by view_count
     let vidOffset = 0;
     while (true) {
       const { data: videos } = await query('product_videos', {
         select: '*',
-        created_at: `gte.${looseCreatedCutoff}`,
         order: 'view_count.desc',
         limit: '1000',
         offset: String(vidOffset),
@@ -219,11 +217,9 @@ export async function fetchTopVideos(
       allVideos = allVideos.concat(videos);
       if (videos.length < 1000) break;
       vidOffset += 1000;
-      // Cap at 10,000 videos to avoid infinite loading
-      if (allVideos.length >= 10000) break;
     }
   } else {
-    // Per-niche: get product_ids first, then fetch their videos
+    // Per-niche: get product_ids first (with sold_count > 0), then their videos
     let allProductIds: string[] = [];
     let productOffset = 0;
     while (true) {

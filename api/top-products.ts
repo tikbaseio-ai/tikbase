@@ -308,11 +308,11 @@ async function computeTopProducts(
     const videos = videoMap[p.product_id] || [];
     const snapshots = snapMap[p.product_id] || [];
     const metrics = estimateProductMetrics(p, videos, days, medianPrice, snapshots);
-    // Get top 5 video thumbnails
+    // Get top 5 video thumbnails — fall back to product image if video has no cover
     const topVideos = videos.slice(0, 5).map((v: any) => ({
       video_url: v.video_url,
       view_count: v.view_count,
-      cover_image_url: v.cover_image_url,
+      cover_image_url: v.cover_image_url || p.image_url || null,
     }));
     return { ...p, metrics, topVideos };
   });

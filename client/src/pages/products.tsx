@@ -211,7 +211,6 @@ export default function ProductsPage() {
                   <SortHeader label="Revenue" sortKeyVal="estRevenue" />
                   <SortHeader label="Units Sold" sortKeyVal="sold_count" />
 
-                  <SortHeader label="Stock" sortKeyVal="stock_quantity" />
                   <SortHeader label="Price" sortKeyVal="sale_price" />
                   <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[160px]">Top Videos</th>
                   <th className="py-3 px-3 w-10"></th>
@@ -330,13 +329,6 @@ export default function ProductsPage() {
                       </td>
 
 
-
-                      {/* Stock */}
-                      <td className="py-3 px-3 text-right">
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {(product.stock_quantity || 0).toLocaleString()}
-                        </span>
-                      </td>
 
                       {/* Price */}
                       <td className="py-3 px-3 text-right">

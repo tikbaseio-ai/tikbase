@@ -10,6 +10,7 @@ import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
 import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock } from 'lucide-react';
+import { LoadingBar } from '@/components/LoadingBar';
 
 interface EnrichedProduct extends Product {
   metrics: ProductEstimates;
@@ -121,6 +122,7 @@ export default function ProductsPage() {
 
   return (
     <div className="p-6" data-testid="products-page">
+      <LoadingBar loading={loading} />
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">

@@ -11,6 +11,7 @@ import {
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
 import { Bookmark, ExternalLink, Eye, ShoppingBag, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { LoadingBar } from '@/components/LoadingBar';
 
 export default function VideosPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
@@ -68,6 +69,7 @@ export default function VideosPage() {
 
   return (
     <div className="p-6" data-testid="videos-page">
+      <LoadingBar loading={loading} />
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Videos</h1>

@@ -128,6 +128,114 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
+  // ---- Top videos (server-side computation with caching) ----
+  const videoCache = new Map<string, { videos: any[]; timestamp: number }>();
+  const VIDEO_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+  function extractPostDateServer(videoUrl: string): Date | null {
+    const match = videoUrl?.match(/video\/(\d+)/);
+    if (!match) return null;
+    try {
+      const ts = Number(BigInt(match[1]) >> 32n);
+      const date = new Date(ts * 1000);
+      if (date.getFullYear() < 2020 || date.getFullYear() > 2027) return null;
+      return date;
+    } catch { return null; }
+  }
+
+  app.get("/api/top-videos", async (req, res) => {
+    try {
+      const nicheSlug = (req.query.niche as string) || "all";
+      const days = parseInt((req.query.days as string) || "7", 10);
+      const page = parseInt((req.query.page as string) || "1", 10);
+      const limit = parseInt((req.query.limit as string) || "50", 10);
+
+      if (![7, 14, 30, 90, 180, 365].includes(days)) {
+        return res.status(400).json({ error: "Invalid days" });
+      }
+
+      const cacheKey = `${nicheSlug}:${days}`;
+      const cached = videoCache.get(cacheKey);
+      let videos: any[];
+
+      if (cached && Date.now() - cached.timestamp < VIDEO_CACHE_TTL) {
+        videos = cached.videos;
+      } else {
+        const supabase = getSupabaseAdmin();
+        const cutoffDate = new Date(Date.now() - days * 86400000);
+
+        // Fetch all videos
+        let allVids: any[] = [];
+        if (nicheSlug === "all") {
+          let offset = 0;
+          while (true) {
+            const { data } = await supabase.from("product_videos").select("*")
+              .order("view_count", { ascending: false }).range(offset, offset + 999);
+            if (!data || data.length === 0) break;
+            allVids = allVids.concat(data);
+            if (data.length < 1000) break;
+            offset += 1000;
+          }
+        } else {
+          let pids: string[] = [];
+          let pOff = 0;
+          while (true) {
+            const { data } = await supabase.from("products").select("product_id")
+              .eq("niche_slug", nicheSlug).gt("sold_count", 0).range(pOff, pOff + 999);
+            if (!data || data.length === 0) break;
+            pids = pids.concat(data.map((p: any) => p.product_id));
+            if (data.length < 1000) break;
+            pOff += 1000;
+          }
+          for (let i = 0; i < pids.length; i += 200) {
+            const batch = pids.slice(i, i + 200);
+            const { data } = await supabase.from("product_videos").select("*")
+              .in("product_id", batch).order("view_count", { ascending: false }).limit(5000);
+            if (data) allVids = allVids.concat(data);
+          }
+        }
+
+        // Dedup + snowflake filter
+        const seen = new Set<string>();
+        const filtered = allVids
+          .filter((v: any) => {
+            const id = v.video_url?.match(/video\/(\d+)/)?.[1];
+            if (!id || seen.has(id)) return false;
+            seen.add(id);
+            const pd = extractPostDateServer(v.video_url);
+            return pd && pd >= cutoffDate;
+          })
+          .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
+
+        // Fetch products
+        const vpids = [...new Set(filtered.map((v: any) => v.product_id))] as string[];
+        const pMap: Record<string, any> = {};
+        for (let i = 0; i < vpids.length; i += 200) {
+          const batch = vpids.slice(i, i + 200);
+          const { data } = await supabase.from("products").select("*").in("product_id", batch);
+          if (data) data.forEach((p: any) => { pMap[p.product_id] = p; });
+        }
+
+        videos = filtered
+          .map((v: any) => {
+            const p = pMap[v.product_id];
+            if (!p || p.title?.includes("Discovered Videos") || (p.sold_count ?? 0) <= 0) return null;
+            return { ...v, product: p };
+          })
+          .filter(Boolean) as any[];
+
+        videoCache.set(cacheKey, { videos, timestamp: Date.now() });
+      }
+
+      const offset = (page - 1) * limit;
+      res.setHeader("Cache-Control", "s-maxage=3600, max-age=300");
+      return res.json({ videos: videos.slice(offset, offset + limit), total: videos.length, page, limit });
+    } catch (err: any) {
+      console.error("top-videos error:", err?.message);
+      return res.status(500).json({ error: "Failed to fetch videos" });
+    }
+  });
+
   // ---- Stripe webhook: uses req.rawBody (captured by express.json verify in server/index.ts) ----
   app.post("/api/stripe-webhook", async (req: Request, res) => {
     const signature = req.headers["stripe-signature"] as string | undefined;

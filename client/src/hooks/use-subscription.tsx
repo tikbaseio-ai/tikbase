@@ -25,14 +25,21 @@ const SubscriptionContext = createContext<SubscriptionState>({
 const RECHECK_WINDOW_MS = 5 * 60 * 1000;
 
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [isPaid, setIsPaid] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const stripeOpenedAt = useRef<number | null>(null);
 
-  const checkSubscription = (userId: string) => {
-    return fetch(`/api/check-subscription?user_id=${encodeURIComponent(userId)}`)
+  // Keep the latest access token in a ref so event handlers (visibility) always
+  // read the current token without re-subscribing.
+  const tokenRef = useRef<string | undefined>(session?.access_token);
+  tokenRef.current = session?.access_token;
+
+  const checkSubscription = (token: string) => {
+    return fetch('/api/check-subscription', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then(r => r.json())
       .then(data => {
         setIsPaid(data.isPaid === true);
@@ -45,18 +52,19 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   async function refreshSubscription() {
-    if (user?.id) await checkSubscription(user.id);
+    if (tokenRef.current) await checkSubscription(tokenRef.current);
   }
 
   // Initial check on login
   useEffect(() => {
-    if (!user?.id) {
+    const token = session?.access_token;
+    if (!token) {
       setIsPaid(false);
       setCheckingSubscription(false);
       return;
     }
-    checkSubscription(user.id);
-  }, [user?.id]);
+    checkSubscription(token);
+  }, [session?.access_token]);
 
   // Re-check when user returns to tab after visiting Stripe
   useEffect(() => {
@@ -70,7 +78,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         stripeOpenedAt.current = null;
         return;
       }
-      checkSubscription(user.id!);
+      if (tokenRef.current) checkSubscription(tokenRef.current);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

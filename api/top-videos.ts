@@ -31,14 +31,35 @@ function extractPostDate(videoUrl: string): Date | null {
   }
 }
 
-async function computeTopVideos(nicheSlug: string, days: number): Promise<any[]> {
+function getAdminClient() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error('Missing Supabase env vars');
-
-  const supabase = createClient(url, key, {
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+// Read the daily precomputed video ranking written by
+// pipeline/precompute-rankings.ts. Returns null if not present yet so the
+// handler falls back to live computation.
+async function readPrecomputed(nicheSlug: string, days: number): Promise<any[] | null> {
+  try {
+    const supabase = getAdminClient();
+    const { data, error } = await supabase
+      .from('rankings_cache')
+      .select('payload')
+      .eq('cache_key', `videos:${nicheSlug}:${days}`)
+      .maybeSingle();
+    if (error || !data || !Array.isArray((data as any).payload)) return null;
+    return (data as any).payload as any[];
+  } catch {
+    return null;
+  }
+}
+
+export async function computeTopVideos(nicheSlug: string, days: number): Promise<any[]> {
+  const supabase = getAdminClient();
 
   const cutoffDate = new Date(Date.now() - days * 86400000);
 
@@ -147,8 +168,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const nicheSlug = (req.query.niche as string) || 'all';
     const days = parseInt((req.query.days as string) || '7', 10);
-    const page = parseInt((req.query.page as string) || '1', 10);
-    const limit = parseInt((req.query.limit as string) || '50', 10);
+    const page = Math.max(1, parseInt((req.query.page as string) || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '50', 10) || 50));
 
     // Validate
     if (![7, 14, 30, 90, 180, 365].includes(days)) {
@@ -162,7 +183,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       videos = cached.videos;
     } else {
-      videos = await computeTopVideos(nicheSlug, days);
+      // Prefer the daily precomputed ranking (instant); fall back to live
+      // computation only for combos not yet precomputed.
+      const pre = await readPrecomputed(nicheSlug, days);
+      videos = pre ?? (await computeTopVideos(nicheSlug, days));
       cache.set(cacheKey, { videos, timestamp: Date.now() });
     }
 

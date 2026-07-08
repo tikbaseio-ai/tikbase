@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import {
   NICHES,
   TIMEFRAMES,
@@ -7,9 +7,10 @@ import {
   type ProductVideo,
 } from '@/lib/supabase';
 import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
+import { InfoTip } from '@/components/InfoTip';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
-import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock } from 'lucide-react';
+import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package } from 'lucide-react';
 import { LoadingBar } from '@/components/LoadingBar';
 
 interface EnrichedProduct extends Product {
@@ -58,7 +59,18 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('estRevenue');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [mode, setMode] = useState<'bestsellers' | 'trending'>('bestsellers');
   const [page, setPage] = useState(1);
+
+  // Ranking presets. Best Sellers = actual performance (revenue from real/
+  // estimated units sold in the window). Trending = fastest-rising video
+  // attention. Both are just a default sort over the same data; users can
+  // still click any column to re-sort.
+  function applyMode(next: 'bestsellers' | 'trending') {
+    setMode(next);
+    setSortKey(next === 'bestsellers' ? 'estRevenue' : 'periodViews');
+    setSortDir('desc');
+  }
   const { isProductBookmarked, toggleProductBookmark } = useBookmarks();
 
   const limit = 50;
@@ -93,19 +105,28 @@ export default function ProductsPage() {
     return () => { cancelled = true; };
   }, [niche, timeframe, page, sortKey, sortDir]);
 
-  // Pre-fetch other timeframes for instant tab switching
+  // Pre-fetch the OTHER timeframes for snappier tab switching — but only after
+  // the current view has loaded, and sequentially, so we don't fire several
+  // heavy uncached computations at once and starve the foreground request.
   useEffect(() => {
-    TIMEFRAMES.filter(t => t.days !== timeframe.days).forEach(t => {
-      fetchProducts(niche, t.days, 1, limit, sortKey, sortDir).catch(() => {});
-    });
-  }, [niche]);
+    if (loading) return;
+    let cancelled = false;
+    const others = TIMEFRAMES.filter(t => t.days !== timeframe.days);
+    (async () => {
+      for (const t of others) {
+        if (cancelled) return;
+        await fetchProducts(niche, t.days, 1, limit, sortKey, sortDir).catch(() => {});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [niche, loading]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
     else { setSortKey(key); setSortDir('desc'); }
   }
 
-  function SortHeader({ label, sortKeyVal, className = '' }: { label: string; sortKeyVal: SortKey; className?: string }) {
+  function SortHeader({ label, sortKeyVal, tip, className = '' }: { label: string; sortKeyVal: SortKey; tip?: ReactNode; className?: string }) {
     const active = sortKey === sortKeyVal;
     return (
       <th
@@ -114,6 +135,7 @@ export default function ProductsPage() {
       >
         <div className={`flex items-center gap-1 ${className.includes('text-left') ? '' : 'justify-end'}`}>
           {label}
+          {tip && <InfoTip size={11}>{tip}</InfoTip>}
           {active && (sortDir === 'desc' ? <ChevronDown size={12} className="text-[#a3ff00]" /> : <ChevronUp size={12} className="text-[#a3ff00]" />)}
         </div>
       </th>
@@ -125,12 +147,35 @@ export default function ProductsPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">
-          Ranked by video views within the selected timeframe — products with recent viral content rank highest
+          {mode === 'bestsellers'
+            ? 'The best-performing products in your selected timeframe, ranked by revenue from units sold.'
+            : 'Products with the fastest-rising TikTok video attention in your selected timeframe.'}
         </p>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
+        {/* Ranking-mode toggle */}
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
+          {([['bestsellers', 'Best Sellers'], ['trending', 'Trending']] as const).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => applyMode(val)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${mode === val ? 'text-[#0a0a0c]' : 'text-muted-foreground hover:text-foreground'}`}
+              style={mode === val ? { backgroundColor: '#a3ff00' } : undefined}
+              data-testid={`mode-${val}`}
+            >
+              {label}
+            </button>
+          ))}
+          <InfoTip size={12} className="mx-1">
+            <span className="font-semibold text-foreground">Best Sellers</span> ranks by
+            actual revenue from units sold in the window (real sales when available,
+            otherwise estimated). <span className="font-semibold text-foreground">Trending</span> ranks
+            by fastest-rising video views. Click any column to re-sort.
+          </InfoTip>
+        </div>
+
         <select value={niche} onChange={e => {
             if (!isPaid && e.target.value !== 'all') {
               e.target.value = 'all';
@@ -174,16 +219,24 @@ export default function ProductsPage() {
       <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-zinc-900/60 border border-zinc-800 text-[11px] text-zinc-400">
         <TrendingUp size={13} className="text-zinc-500 flex-shrink-0" />
         <span>
-          Products ranked by views from TikTok videos posted within the selected timeframe.
-          Products with no recent video activity will rank lower.
+          {mode === 'bestsellers'
+            ? 'Ranked by revenue from units sold in the selected timeframe. Rows marked “in period” use real day-over-day sales; “estimated” rows are modeled from views until more sales history accrues.'
+            : 'Ranked by views from TikTok videos posted within the selected timeframe. Products with no recent video activity rank lower.'}
         </span>
       </div>
 
       {loading && <LoadingBar loading={loading} />}
 
       {!loading && total === 0 && (
-        <div className="text-center py-20 text-muted-foreground">
-          <p className="text-sm">No products found for this niche/timeframe.</p>
+        <div className="flex flex-col items-center text-center py-20 px-6">
+          <div className="w-11 h-11 rounded-full bg-secondary/60 flex items-center justify-center mb-3">
+            <Package size={20} className="text-muted-foreground" />
+          </div>
+          <p className="text-sm font-medium text-foreground mb-1">No products in this view yet</p>
+          <p className="text-xs text-muted-foreground max-w-xs">
+            No products have recent video activity for this niche and timeframe. Try a
+            broader timeframe (like 1 Year) or switch niche to <span className="text-foreground">All</span>.
+          </p>
         </div>
       )}
 
@@ -195,12 +248,34 @@ export default function ProductsPage() {
                 <tr className="border-b border-border">
                   <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground w-12">#</th>
                   <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[220px]">Product</th>
-                  <SortHeader label="Period Views" sortKeyVal="periodViews" />
-                  <SortHeader label="Revenue" sortKeyVal="estRevenue" />
-                  <SortHeader label="Units Sold" sortKeyVal="sold_count" />
-
-                  <SortHeader label="Price" sortKeyVal="sale_price" />
-                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[160px]">Top Videos</th>
+                  <SortHeader
+                    label="Period Views"
+                    sortKeyVal="periodViews"
+                    tip="Total TikTok views from videos about this product posted within your selected timeframe. This is the main ranking signal — products with fresh viral videos rank highest."
+                  />
+                  <SortHeader
+                    label="Revenue"
+                    sortKeyVal="estRevenue"
+                    tip="Estimated revenue for the period = estimated units sold × price. A ≈ means the price was estimated from the category median. Directional, not exact sales."
+                  />
+                  <SortHeader
+                    label="Units Sold"
+                    sortKeyVal="sold_count"
+                    tip="Estimated units sold during the selected period. “in period” = measured from real day-over-day sales snapshots; “estimated” = modeled from views when snapshot data isn’t available yet."
+                  />
+                  <SortHeader
+                    label="Price"
+                    sortKeyVal="sale_price"
+                    tip="Current listed sale price on TikTok Shop (US region)."
+                  />
+                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[160px]">
+                    <div className="flex items-center gap-1">
+                      Top Videos
+                      <InfoTip size={11}>
+                        The highest-viewed TikTok videos driving this product. Hover a thumbnail for its view count; click to open on TikTok.
+                      </InfoTip>
+                    </div>
+                  </th>
                   <th className="py-3 px-3 w-10"></th>
                 </tr>
               </thead>

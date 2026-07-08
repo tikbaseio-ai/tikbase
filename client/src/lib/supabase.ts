@@ -103,6 +103,13 @@ export const NICHES = [
   { slug: 'womens-wear', label: "Women's Wear" },
   { slug: 'tech-gadgets', label: 'Tech Gadgets' },
   { slug: 'pet-products', label: 'Pet Products' },
+  { slug: 'home-kitchen', label: 'Home & Kitchen' },
+  { slug: 'food-beverage', label: 'Food & Beverage' },
+  { slug: 'shoes-footwear', label: 'Shoes & Footwear' },
+  { slug: 'accessories-jewelry', label: 'Accessories & Jewelry' },
+  { slug: 'baby-kids', label: 'Baby & Kids' },
+  { slug: 'toys-games', label: 'Toys & Games' },
+  { slug: 'fragrance', label: 'Fragrance & Perfume' },
 ];
 
 // Niches without the 'all' option (for Videos page which doesn't support all)

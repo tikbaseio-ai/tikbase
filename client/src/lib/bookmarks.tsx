@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { VideoWithProduct, Product } from './supabase';
 
 interface BookmarkState {
@@ -12,9 +12,44 @@ interface BookmarkState {
 
 const BookmarkContext = createContext<BookmarkState | null>(null);
 
+const VIDEOS_KEY = 'tikbase:savedVideos';
+const PRODUCTS_KEY = 'tikbase:savedProducts';
+
+// localStorage may be unavailable (e.g. sandboxed iframe hosts); degrade
+// gracefully so bookmarks persist where possible and never throw where not.
+function loadSaved<T>(key: string): T[] {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSaved<T>(key: string, value: T[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage blocked — keep in-memory only */
+  }
+}
+
 export function BookmarkProvider({ children }: { children: ReactNode }) {
-  const [savedVideos, setSavedVideos] = useState<VideoWithProduct[]>([]);
-  const [savedProducts, setSavedProducts] = useState<Product[]>([]);
+  const [savedVideos, setSavedVideos] = useState<VideoWithProduct[]>(() =>
+    loadSaved<VideoWithProduct>(VIDEOS_KEY)
+  );
+  const [savedProducts, setSavedProducts] = useState<Product[]>(() =>
+    loadSaved<Product>(PRODUCTS_KEY)
+  );
+
+  useEffect(() => {
+    persistSaved(VIDEOS_KEY, savedVideos);
+  }, [savedVideos]);
+
+  useEffect(() => {
+    persistSaved(PRODUCTS_KEY, savedProducts);
+  }, [savedProducts]);
 
   const isVideoBookmarked = useCallback(
     (videoId: number) => savedVideos.some(v => v.id === videoId),

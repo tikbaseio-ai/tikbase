@@ -8,7 +8,7 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -35,3 +35,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node pipeline/discover-videos.js
+
+      # Precompute Top Products/Videos rankings into rankings_cache so the API
+      # serves instant reads. Runs LAST, over the freshly-collected data. Reads
+      # only from Supabase — no ScrapeCreators credits needed.
+      - name: Precompute rankings cache
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx pipeline/precompute-rankings.ts

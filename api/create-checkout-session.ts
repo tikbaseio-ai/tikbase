@@ -6,6 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
 
 // Hardcoded live Stripe price IDs. Add new plans here.
 const PRICE_IDS: Record<string, string> = {
@@ -50,9 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { plan, user_id, email, promo_code } = (req.body ?? {}) as {
+    const { plan, email, promo_code } = (req.body ?? {}) as {
       plan?: 'monthly' | 'annual';
-      user_id?: string;
       email?: string;
       promo_code?: string;
     };
@@ -60,9 +60,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!plan || !PRICE_IDS[plan]) {
       return res.status(400).json({ error: 'Invalid or missing plan' });
     }
-    if (!user_id) {
-      return res.status(400).json({ error: 'user_id is required' });
+
+    // Identify the caller from the verified access token — never trust a
+    // client-supplied user_id, which is written into the subscription metadata.
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase env vars missing' });
     }
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !authData.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const user_id = authData.user.id;
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
     const baseUrl = getBaseUrl(req);
@@ -99,6 +115,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ url: session.url });
   } catch (err: any) {
     console.error('create-checkout-session error:', err.message);
-    return res.status(500).json({ error: err.message || 'Failed to create checkout session' });
+    return res.status(500).json({ error: 'Failed to create checkout session' });
   }
 }

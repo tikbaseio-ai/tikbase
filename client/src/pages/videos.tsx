@@ -12,6 +12,8 @@ import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
 import { Bookmark, ExternalLink, Eye, ShoppingBag, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import { LoadingBar } from '@/components/LoadingBar';
+import { InfoTip } from '@/components/InfoTip';
+import { OnboardingBanner } from '@/components/OnboardingBanner';
 
 export default function VideosPage() {
   const [niche, setNiche] = useState(NICHES[0].slug);
@@ -57,23 +59,40 @@ export default function VideosPage() {
     return () => { cancelled = true; };
   }, [niche, timeframe, page]);
 
-  // Pre-fetch other timeframes in the background so tab switching is instant
+  // Pre-fetch the OTHER timeframes for snappier tab switching — but only after
+  // the current view has loaded, and sequentially, so we don't fire 5 heavy
+  // uncached computations at once and starve the foreground request. Disabled
+  // while the current view is still loading.
   useEffect(() => {
-    const otherTimeframes = TIMEFRAMES.filter(t => t.days !== timeframe.days);
-    otherTimeframes.forEach(t => {
-      fetchTopVideos(niche, t.days, 1, limit).catch(() => {});
-    });
-  }, [niche]);
+    if (loading) return;
+    let cancelled = false;
+    const others = TIMEFRAMES.filter(t => t.days !== timeframe.days);
+    (async () => {
+      for (const t of others) {
+        if (cancelled) return;
+        await fetchTopVideos(niche, t.days, 1, limit).catch(() => {});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [niche, loading]);
 
   const nicheLabel = NICHES.find(n => n.slug === niche)?.label || niche;
 
   return (
     <div className="p-6" data-testid="videos-page">
+      {/* First-run "how it works" strip (dismissible) */}
+      <OnboardingBanner />
+
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Videos</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground flex items-center gap-1.5">
           Trending TikTok Shop videos ranked by views
+          <InfoTip size={13}>
+            The most-viewed TikTok videos selling a product, within your chosen
+            niche and timeframe. Use the filters below to narrow by category and
+            recency; bookmark any video with the ☆ to save it.
+          </InfoTip>
         </p>
       </div>
 
@@ -142,8 +161,18 @@ export default function VideosPage() {
 
       {/* Video grid */}
       {!loading && videos.length === 0 && (
-        <div className="text-center py-20 text-muted-foreground">
-          <p className="text-sm">No videos found for {nicheLabel} in this timeframe.</p>
+        <div className="flex flex-col items-center text-center py-20 px-6">
+          <div className="w-11 h-11 rounded-full bg-secondary/60 flex items-center justify-center mb-3">
+            <Eye size={20} className="text-muted-foreground" />
+          </div>
+          <p className="text-sm font-medium text-foreground mb-1">
+            No videos for {nicheLabel} in this timeframe
+          </p>
+          <p className="text-xs text-muted-foreground max-w-xs">
+            Nothing matched this niche and recency window. Try a longer timeframe
+            or switch the niche to <span className="text-foreground">All</span> to see
+            everything trending.
+          </p>
         </div>
       )}
 

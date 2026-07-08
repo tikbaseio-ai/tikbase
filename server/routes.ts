@@ -2,6 +2,8 @@ import type { Express, Request } from "express";
 import { type Server } from "http";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import topProductsHandler from "../api/top-products";
+import topVideosHandler from "../api/top-videos";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -16,6 +18,17 @@ function getSupabaseAdmin(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return cachedAdmin;
+}
+
+// Verify the caller's Supabase access token and return their user id, or null.
+// Never trust a client-supplied user_id for per-user actions.
+async function getAuthedUserId(req: Request): Promise<string | null> {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!token) return null;
+  const { data, error } = await getSupabaseAdmin().auth.getUser(token);
+  if (error || !data.user) return null;
+  return data.user.id;
 }
 
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
@@ -128,111 +141,33 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
-  // ---- Top videos (server-side computation with caching) ----
-  const videoCache = new Map<string, { videos: any[]; timestamp: number }>();
-  const VIDEO_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-
-  function extractPostDateServer(videoUrl: string): Date | null {
-    const match = videoUrl?.match(/video\/(\d+)/);
-    if (!match) return null;
-    try {
-      const ts = Number(BigInt(match[1]) >> 32n);
-      const date = new Date(ts * 1000);
-      if (date.getFullYear() < 2020 || date.getFullYear() > 2027) return null;
-      return date;
-    } catch { return null; }
-  }
-
+  // ---- Top videos ----
+  // Reuse the exact Vercel serverless handler (api/top-videos.ts), same pattern
+  // as top-products, so dev and prod share one implementation and can't drift.
   app.get("/api/top-videos", async (req, res) => {
     try {
-      const nicheSlug = (req.query.niche as string) || "all";
-      const days = parseInt((req.query.days as string) || "7", 10);
-      const page = parseInt((req.query.page as string) || "1", 10);
-      const limit = parseInt((req.query.limit as string) || "50", 10);
-
-      if (![7, 14, 30, 90, 180, 365].includes(days)) {
-        return res.status(400).json({ error: "Invalid days" });
-      }
-
-      const cacheKey = `${nicheSlug}:${days}`;
-      const cached = videoCache.get(cacheKey);
-      let videos: any[];
-
-      if (cached && Date.now() - cached.timestamp < VIDEO_CACHE_TTL) {
-        videos = cached.videos;
-      } else {
-        const supabase = getSupabaseAdmin();
-        const cutoffDate = new Date(Date.now() - days * 86400000);
-
-        // Fetch all videos
-        let allVids: any[] = [];
-        if (nicheSlug === "all") {
-          let offset = 0;
-          while (true) {
-            const { data } = await supabase.from("product_videos").select("*")
-              .order("view_count", { ascending: false }).range(offset, offset + 999);
-            if (!data || data.length === 0) break;
-            allVids = allVids.concat(data);
-            if (data.length < 1000) break;
-            offset += 1000;
-          }
-        } else {
-          let pids: string[] = [];
-          let pOff = 0;
-          while (true) {
-            const { data } = await supabase.from("products").select("product_id")
-              .eq("niche_slug", nicheSlug).gt("sold_count", 0).range(pOff, pOff + 999);
-            if (!data || data.length === 0) break;
-            pids = pids.concat(data.map((p: any) => p.product_id));
-            if (data.length < 1000) break;
-            pOff += 1000;
-          }
-          for (let i = 0; i < pids.length; i += 200) {
-            const batch = pids.slice(i, i + 200);
-            const { data } = await supabase.from("product_videos").select("*")
-              .in("product_id", batch).order("view_count", { ascending: false }).limit(5000);
-            if (data) allVids = allVids.concat(data);
-          }
-        }
-
-        // Dedup + snowflake filter
-        const seen = new Set<string>();
-        const filtered = allVids
-          .filter((v: any) => {
-            const id = v.video_url?.match(/video\/(\d+)/)?.[1];
-            if (!id || seen.has(id)) return false;
-            seen.add(id);
-            const pd = extractPostDateServer(v.video_url);
-            return pd && pd >= cutoffDate;
-          })
-          .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0));
-
-        // Fetch products
-        const vpids = [...new Set(filtered.map((v: any) => v.product_id))] as string[];
-        const pMap: Record<string, any> = {};
-        for (let i = 0; i < vpids.length; i += 200) {
-          const batch = vpids.slice(i, i + 200);
-          const { data } = await supabase.from("products").select("*").in("product_id", batch);
-          if (data) data.forEach((p: any) => { pMap[p.product_id] = p; });
-        }
-
-        videos = filtered
-          .map((v: any) => {
-            const p = pMap[v.product_id];
-            if (!p || p.title?.includes("Discovered Videos") || (p.sold_count ?? 0) <= 0) return null;
-            return { ...v, product: p };
-          })
-          .filter(Boolean) as any[];
-
-        videoCache.set(cacheKey, { videos, timestamp: Date.now() });
-      }
-
-      const offset = (page - 1) * limit;
-      res.setHeader("Cache-Control", "s-maxage=3600, max-age=300");
-      return res.json({ videos: videos.slice(offset, offset + limit), total: videos.length, page, limit });
+      await topVideosHandler(req as any, res as any);
     } catch (err: any) {
-      console.error("top-videos error:", err?.message);
-      return res.status(500).json({ error: "Failed to fetch videos" });
+      console.error("top-videos (proxy) error:", err?.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to fetch videos" });
+      }
+    }
+  });
+
+  // ---- Top products ----
+  // Reuse the exact Vercel serverless handler (api/top-products.ts) so local
+  // dev (Express) and production (Vercel) can never drift. VercelRequest /
+  // VercelResponse are structurally compatible with Express req/res for this
+  // handler's usage (req.query, res.status/json/setHeader).
+  app.get("/api/top-products", async (req, res) => {
+    try {
+      await topProductsHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("top-products (proxy) error:", err?.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to fetch products" });
+      }
     }
   });
 
@@ -296,7 +231,7 @@ export async function registerRoutes(
   // ---- Create Stripe Checkout Session (replaces raw Payment Link URLs) ----
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
-      const { plan, user_id, email, promo_code } = req.body ?? {};
+      const { plan, email, promo_code } = req.body ?? {};
       const PRICE_IDS: Record<string, string> = {
         monthly: "price_1THHz2CmsZejQhLSRBkSjObx",
         annual: "price_1THHz3CmsZejQhLScuVuKg8o",
@@ -304,8 +239,9 @@ export async function registerRoutes(
       if (!plan || !PRICE_IDS[plan]) {
         return res.status(400).json({ error: "Invalid or missing plan" });
       }
+      const user_id = await getAuthedUserId(req);
       if (!user_id) {
-        return res.status(400).json({ error: "user_id is required" });
+        return res.status(401).json({ error: "Unauthorized" });
       }
 
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -347,7 +283,7 @@ export async function registerRoutes(
       return res.json({ url: session.url });
     } catch (err: any) {
       console.error("create-checkout-session error:", err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: "Failed to create checkout session" });
     }
   });
 
@@ -395,7 +331,7 @@ export async function registerRoutes(
   // ---- Check subscription by supabase user_id ----
   app.get("/api/check-subscription", async (req, res) => {
     try {
-      const userId = req.query.user_id as string | undefined;
+      const userId = await getAuthedUserId(req);
       if (!userId) return res.json({ isPaid: false });
 
       const sub = await getStoredSubscription(userId);
@@ -409,9 +345,9 @@ export async function registerRoutes(
   // ---- Billing portal (by supabase user_id) ----
   app.post("/api/create-portal-session", async (req, res) => {
     try {
-      const { user_id } = req.body ?? {};
+      const user_id = await getAuthedUserId(req);
       if (!user_id)
-        return res.status(400).json({ error: "user_id is required" });
+        return res.status(401).json({ error: "Unauthorized" });
 
       const stored = await getStoredSubscription(user_id);
       if (!stored) {

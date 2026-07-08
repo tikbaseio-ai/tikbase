@@ -43,6 +43,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const API_BASE = "https://api.scrapecreators.com";
 const RATE_LIMIT_MS = 250; // 250ms between API calls
+// Region for the product-detail endpoint. Pins pricing to the US market —
+// without it some products return a non-US price. (Verified: it does NOT
+// change the 404/availability rate.)
+const REGION = process.env.SCRAPECREATORS_REGION || "US";
+
+// Phase 3 snapshot freshness: each day we re-fetch fresh sold_count/price/stock
+// for the highest-velocity products (sold_count>0, not price_unavailable),
+// ordered by sold_count desc, capped at SNAPSHOT_TRACKED_LIMIT. Bounded
+// concurrency matches the backfill script.
+const SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 3000;
+const SNAPSHOT_CONCURRENCY = 10;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,6 +99,13 @@ const NICHE_LABELS = {
   "mens-wear": "Men's Wear",
   "tech-gadgets": "Tech & Gadgets",
   "pet-products": "Pet Products",
+  "home-kitchen": "Home & Kitchen",
+  "food-beverage": "Food & Beverage",
+  "shoes-footwear": "Shoes & Footwear",
+  "accessories-jewelry": "Accessories & Jewelry",
+  "baby-kids": "Baby & Kids",
+  "toys-games": "Toys & Games",
+  "fragrance": "Fragrance & Perfume",
 };
 
 const KEYWORD_QUERIES = {
@@ -111,27 +129,13 @@ const KEYWORD_QUERIES = {
     "tiktok made me buy it fitness",
     "home gym tiktok shop",
     "fitness gadgets trending tiktok",
-    "viral gym accessories tiktok",
     "tiktok shop protein supplements",
-    "workout gear tiktok viral",
     "tiktok shop resistance bands",
-    "tiktok shop protein powder viral",
-    "tiktok shop leggings gym",
     "creatine tiktok shop",
-    "home workout equipment tiktok",
-    "tiktok shop dumbbells",
     "massage gun tiktok viral",
-    "yoga mat tiktok shop",
     "pre workout tiktok shop",
-    "gym accessories viral tiktok",
     "tiktok shop sports bra",
-    "fitness tracker tiktok shop",
-    "shaker bottle tiktok viral",
-    "jump rope tiktok shop",
-    "foam roller tiktok viral",
-    "weightlifting belt tiktok",
-    "compression pants tiktok shop",
-    "gym shark tiktok shop",
+    "tiktok shop leggings gym",
   ],
   "health-wellness": [
     "tiktok shop health products viral",
@@ -193,6 +197,116 @@ const KEYWORD_QUERIES = {
     "viral pet gadgets tiktok",
     "pet essentials tiktok affiliate",
   ],
+  "home-kitchen": [
+    "tiktok shop kitchen gadgets viral",
+    "tiktok made me buy it kitchen",
+    "cleantok must haves tiktok shop",
+    "home organization tiktok shop",
+    "viral cleaning products tiktok shop",
+    "kitchen finds tiktok shop",
+    "tiktok shop home gadgets viral",
+    "restock tiktok shop organization",
+    "tiktok shop kitchen must haves",
+    "satisfying cleaning gadgets tiktok",
+    "viral home products tiktok affiliate",
+    "tiktok shop storage organization",
+    "rapid egg cooker tiktok shop",
+    "tiktok shop vacuum sealer viral",
+  ],
+  "food-beverage": [
+    "tiktok shop snacks viral",
+    "tiktok made me buy it snacks",
+    "freeze dried candy tiktok shop",
+    "viral snacks tiktok shop",
+    "tiktok shop food must haves",
+    "boba kit tiktok shop",
+    "tiktok shop drinks viral",
+    "snack haul tiktok shop",
+    "tiktok shop candy viral",
+    "energy drink tiktok shop trending",
+    "exotic snacks tiktok shop",
+    "tiktok shop chips spicy viral",
+    "best tiktok shop snacks",
+    "freeze dried skittles tiktok",
+  ],
+  "shoes-footwear": [
+    "tiktok shop shoes viral",
+    "tiktok made me buy it shoes",
+    "viral sneakers tiktok shop",
+    "tiktok shop shoe finds",
+    "crocs tiktok shop",
+    "hey dude tiktok shop",
+    "tiktok shop boots women",
+    "comfortable shoes tiktok viral",
+    "tiktok shop sandals summer",
+    "best tiktok shop shoes",
+    "slippers tiktok shop viral",
+    "tiktok shop trainers sneakers",
+    "barefoot shoes tiktok shop",
+    "tiktok shop clogs mules",
+  ],
+  "accessories-jewelry": [
+    "tiktok shop jewelry viral",
+    "tiktok made me buy it jewelry",
+    "viral accessories tiktok shop",
+    "tiktok shop gold jewelry finds",
+    "tiktok shop necklace viral",
+    "jewelry haul tiktok shop",
+    "tiktok shop earrings trending",
+    "tiktok shop bags purse viral",
+    "tiktok shop sunglasses finds",
+    "best tiktok shop accessories",
+    "tiktok shop rings stackable",
+    "tiktok shop watch viral",
+    "waterproof jewelry tiktok shop",
+    "tiktok shop hair accessories viral",
+  ],
+  "baby-kids": [
+    "tiktok shop baby products viral",
+    "tiktok made me buy it baby",
+    "viral baby finds tiktok shop",
+    "tiktok shop toddler must haves",
+    "montessori toys tiktok shop",
+    "tiktok shop maternity pregnancy",
+    "baby essentials tiktok shop",
+    "tiktok shop kids products viral",
+    "momcozy tiktok shop",
+    "tiktok shop nursery organization",
+    "best tiktok shop baby",
+    "tiktok shop pregnancy pillow",
+    "sensory toys tiktok shop",
+    "tiktok shop baby gadgets viral",
+  ],
+  "toys-games": [
+    "tiktok shop toys viral",
+    "tiktok made me buy it toys",
+    "viral fidget toys tiktok shop",
+    "tiktok shop squishies trending",
+    "satisfying toys tiktok shop",
+    "tiktok shop plushies viral",
+    "stress relief toys tiktok shop",
+    "tiktok shop trading cards",
+    "kids toys tiktok shop viral",
+    "tiktok shop collectibles trending",
+    "best tiktok shop toys",
+    "tiktok shop board games viral",
+    "bubble wand tiktok shop",
+    "mystery squishy tiktok shop",
+  ],
+  "fragrance": [
+    "tiktok shop perfume viral",
+    "tiktok made me buy it perfume",
+    "viral fragrance tiktok shop",
+    "tiktok shop perfume dupes",
+    "long lasting perfume tiktok shop",
+    "tiktok shop cologne men",
+    "perfume haul tiktok shop",
+    "tiktok shop body mist viral",
+    "best tiktok shop perfume",
+    "tiktok shop fragrance finds",
+    "viral cologne tiktok affiliate",
+    "tiktok shop perfume women trending",
+  ],
 };
 
 const SHOP_SEARCH_TERMS = {
@@ -247,6 +361,74 @@ const SHOP_SEARCH_TERMS = {
     "pet accessories",
     "pet toys",
     "pet grooming",
+  ],
+  "home-kitchen": [
+    "kitchen gadgets",
+    "cleaning supplies",
+    "home organization",
+    "storage containers",
+    "kitchen tools",
+    "home decor",
+    "egg cooker",
+    "vacuum sealer",
+  ],
+  "food-beverage": [
+    "snacks",
+    "freeze dried candy",
+    "chips",
+    "candy",
+    "boba",
+    "energy drink",
+    "exotic snacks",
+    "seasoning",
+  ],
+  "shoes-footwear": [
+    "sneakers",
+    "womens boots",
+    "sandals",
+    "slippers",
+    "crocs",
+    "mens shoes",
+    "clogs",
+    "running shoes",
+  ],
+  "accessories-jewelry": [
+    "jewelry",
+    "necklace",
+    "earrings",
+    "rings",
+    "handbag",
+    "sunglasses",
+    "watch",
+    "hair accessories",
+  ],
+  "baby-kids": [
+    "baby products",
+    "baby toys",
+    "maternity",
+    "pregnancy pillow",
+    "montessori toys",
+    "toddler",
+    "nursery",
+    "baby essentials",
+  ],
+  "toys-games": [
+    "fidget toys",
+    "squishies",
+    "plush toys",
+    "stress relief toys",
+    "trading cards",
+    "collectibles",
+    "board games",
+    "kids toys",
+  ],
+  "fragrance": [
+    "perfume",
+    "cologne",
+    "fragrance",
+    "body mist",
+    "perfume dupe",
+    "eau de parfum",
   ],
 };
 
@@ -429,16 +611,23 @@ async function phase2() {
             p?.product_id || p?.id || p?.item_id;
           if (!productId) continue;
 
-          // Extract price from product_price_info (shop search response shape)
+          // Extract price from product_price_info. Verified against the live
+          // shop-search response: the real keys are sale_price_decimal /
+          // origin_price_decimal (NOT min_price / original_price).
           const priceInfo = p?.product_price_info;
-          const salePrice = priceInfo?.min_price != null
-            ? parseFloat(String(priceInfo.min_price).replace(/[^0-9.]/g, '')) || null
-            : p?.sale_price != null ? parseFloat(p.sale_price) || null : null;
-          const originalPrice = priceInfo?.original_price != null
-            ? parseFloat(String(priceInfo.original_price).replace(/[^0-9.]/g, '')) || null
-            : p?.original_price != null ? parseFloat(p.original_price) || null : null;
+          const parsePrice = (v) =>
+            v != null ? parseFloat(String(v).replace(/[^0-9.]/g, '')) || null : null;
+          const salePrice =
+            parsePrice(priceInfo?.sale_price_decimal) ??
+            parsePrice(priceInfo?.sale_price_format) ??
+            parsePrice(priceInfo?.single_product_price_decimal) ??
+            (p?.sale_price != null ? parseFloat(p.sale_price) || null : null);
+          const originalPrice =
+            parsePrice(priceInfo?.origin_price_decimal) ??
+            parsePrice(priceInfo?.origin_price_format) ??
+            (p?.original_price != null ? parseFloat(p.original_price) || null : null);
 
-          // Extract sold count from sold_info — API returns it as a number directly
+          // Extract sold count from sold_info — verified correct against live API.
           const soldCount = p?.sold_info?.sold_count ?? p?.sold_count ?? null;
 
           productsToUpsert.push({
@@ -453,9 +642,9 @@ async function phase2() {
             sale_price: salePrice,
             original_price: originalPrice,
             sold_count: soldCount ?? p?.sold_count ?? null,
-            rating: p?.rate_info?.star ? parseFloat(p.rate_info.star) : (p?.rating ?? null),
+            rating: p?.rate_info?.score != null ? parseFloat(p.rate_info.score) : (p?.rating ?? null),
             review_count: p?.rate_info?.review_count ?? p?.review_count ?? null,
-            seller_name: p?.seller_info?.name || p?.seller?.name || null,
+            seller_name: p?.seller_info?.shop_name || p?.seller_info?.name || p?.seller?.name || null,
             seller_id: p?.seller_info?.seller_id || p?.seller?.id || null,
             product_url: `https://www.tiktok.com/shop/pdp/${productId}`,
             updated_at: new Date().toISOString(),
@@ -492,41 +681,100 @@ async function phase2() {
 // Phase 3 — Snapshot All Products
 // ---------------------------------------------------------------------------
 
-async function phase3() {
+// Raw product-detail fetch (does not throw on non-2xx) so we can distinguish
+// 404s from transient errors. Mirrors the backfill script's approach.
+async function fetchProductDetailRaw(productId) {
+  const productUrl = `https://www.tiktok.com/shop/pdp/${productId}`;
+  const path = `/v1/tiktok/product?url=${encodeURIComponent(productUrl)}&region=${encodeURIComponent(REGION)}`;
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "x-api-key": SCRAPECREATORS_API_KEY },
+    });
+    const text = await res.text().catch(() => "");
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    return { status: res.status, json };
+  } catch (e) {
+    return { status: 0, json: null, err: e.message };
+  }
+}
+
+// Bounded-concurrency pool (never Promise.all the whole list).
+async function snapshotPool(items, concurrency, worker) {
+  let next = 0;
+  async function runner() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      await worker(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, runner));
+}
+
+async function phase3(limitOverride) {
   console.log("\n========== PHASE 3: Snapshot All Products ==========\n");
 
   const snapshotDate = today();
+  const limit = limitOverride ?? SNAPSHOT_TRACKED_LIMIT;
 
-  // Fetch all products
-  let allProducts = [];
-  let from = 0;
-  const pageSize = 1000;
-
-  while (true) {
+  // Tracked set: highest-velocity, still-fetchable products. We re-fetch FRESH
+  // values for these (not the stale stored row) so snapshots actually move
+  // day-over-day and the delta model can compute real units sold.
+  const tracked = [];
+  for (let from = 0; tracked.length < limit; from += 1000) {
     const { data, error } = await supabase
       .from("products")
-      .select("product_id, sold_count, sale_price")
-      .range(from, from + pageSize - 1);
-
+      .select("product_id")
+      .gt("sold_count", 0)
+      .or("price_unavailable.is.null,price_unavailable.eq.false")
+      .order("sold_count", { ascending: false })
+      .range(from, from + 999);
     if (error) {
-      console.error("  [ERROR] Fetching products:", error.message);
+      console.error("  [ERROR] Fetching tracked set:", error.message);
       break;
     }
     if (!data || data.length === 0) break;
-    allProducts = allProducts.concat(data);
-    if (data.length < pageSize) break;
-    from += pageSize;
+    tracked.push(...data.map((r) => r.product_id));
+    if (data.length < 1000) break;
   }
+  const trackedSet = tracked.slice(0, limit);
+  console.log(`  Tracked set: ${trackedSet.length} products (sold>0, fetchable, top by sold_count) | concurrency ${SNAPSHOT_CONCURRENCY}`);
 
-  console.log(`  Found ${allProducts.length} products to snapshot`);
+  const parseNum = (v) =>
+    v != null ? parseFloat(String(v).replace(/[^0-9.]/g, "")) || null : null;
 
-  const snapshots = allProducts.map((p) => ({
-    product_id: p.product_id,
-    sold_count: p.sold_count,
-    sale_price: p.sale_price,
-    snapshot_date: snapshotDate,
-  }));
+  const snapshots = [];
+  const deadIds = [];
+  let fetched = 0, p404 = 0, errors = 0;
 
+  await snapshotPool(trackedSet, SNAPSHOT_CONCURRENCY, async (productId) => {
+    const r = await fetchProductDetailRaw(productId);
+    if (r.status === 404) { p404++; deadIds.push(productId); return; }
+    if (r.status !== 200 || !r.json) { errors++; return; }
+
+    const pb = r.json.product_base;
+    const soldCount = pb?.sold_count != null ? pb.sold_count : null;
+    const salePrice = parseNum(pb?.price?.min_sku_price);
+    // Total inventory across all SKUs (skus[].stock); null if no SKUs present.
+    const stock = Array.isArray(r.json.skus)
+      ? r.json.skus.reduce((sum, s) => sum + (Number(s?.stock) || 0), 0)
+      : null;
+
+    if (soldCount == null && salePrice == null && stock == null) { errors++; return; }
+    snapshots.push({
+      product_id: String(productId),
+      sold_count: soldCount,
+      sale_price: salePrice,
+      stock_quantity: stock,
+      snapshot_date: snapshotDate,
+    });
+    fetched++;
+  });
+
+  console.log(`  Fetched fresh: ${fetched} | 404 (marked): ${p404} | transient errors: ${errors}`);
+
+  // Write snapshots (preserve composite-key upsert + insert fallback).
   for (let i = 0; i < snapshots.length; i += 500) {
     const chunk = snapshots.slice(i, i + 500);
     const { error } = await supabase.from("product_snapshots").upsert(chunk, {
@@ -534,7 +782,6 @@ async function phase3() {
       ignoreDuplicates: false,
     });
     if (error) {
-      // If upsert on composite key fails, try insert
       const { error: insertErr } = await supabase
         .from("product_snapshots")
         .insert(chunk);
@@ -546,7 +793,17 @@ async function phase3() {
     }
   }
 
-  console.log(`  Phase 3 done: ${stats.phase3_snapshots} snapshots created`);
+  // Mark permanently-unavailable (404) products so future runs skip them.
+  for (let i = 0; i < deadIds.length; i += 500) {
+    const chunk = deadIds.slice(i, i + 500);
+    const { error } = await supabase
+      .from("products")
+      .update({ price_unavailable: true })
+      .in("product_id", chunk);
+    if (error) console.error("  [ERROR] mark unavailable:", error.message);
+  }
+
+  console.log(`  Phase 3 done: ${stats.phase3_snapshots} snapshots created (fresh-fetched)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -589,10 +846,11 @@ async function phase4() {
     if ((failTracker[p.product_id] || 0) >= 3) continue;
 
     try {
-      // API expects a URL, not a bare product_id
+      // API expects a URL, not a bare product_id. region pins the price to
+      // the US market (does not affect whether the product resolves).
       const productUrl = `https://www.tiktok.com/shop/pdp/${p.product_id}`;
       const data = await apiFetch(
-        `/v1/tiktok/product?url=${encodeURIComponent(productUrl)}`
+        `/v1/tiktok/product?url=${encodeURIComponent(productUrl)}&region=${encodeURIComponent(REGION)}`
       );
       await sleep(RATE_LIMIT_MS);
 
@@ -730,7 +988,17 @@ async function main() {
   console.log(`\ntikbase daily refresh completed at ${new Date().toISOString()}`);
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// Entry: the daily cron runs the full pipeline. `--phase3-only [N]` runs just
+// Phase 3 (optionally on the first N tracked products) for isolated testing —
+// the cron command is unchanged, so this does not affect scheduled runs.
+if (process.argv.includes("--phase3-only")) {
+  const n = process.argv.slice(2).find((a) => /^\d+$/.test(a));
+  phase3(n ? Number(n) : undefined)
+    .then(() => process.exit(0))
+    .catch((err) => { console.error("Fatal error:", err); process.exit(1); });
+} else {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}

@@ -110,102 +110,105 @@ function estimateProductMetrics(
   let estPeriodUnitsSold: number;
   let hasRealDelta = false;
 
-  if (periodViews === 0) {
+  // Prefer real day-over-day sales from snapshots FIRST — a product can be a
+  // top seller in the window without a fresh viral video, so this is checked
+  // regardless of recent video activity. (Previously periodViews === 0
+  // short-circuited to 0 units and hid genuine best-sellers from the ranking.)
+  const exactDelta = calculateSnapshotDelta(snapshots, periodDays);
+  if (exactDelta != null && exactDelta >= 0) {
+    estPeriodUnitsSold = exactDelta;
+    hasRealDelta = true;
+  } else if (periodViews === 0) {
+    // No measured sales delta and no recent attention → nothing to estimate.
     estPeriodUnitsSold = 0;
   } else {
-    const exactDelta = calculateSnapshotDelta(snapshots, periodDays);
-    if (exactDelta != null && exactDelta >= 0) {
-      estPeriodUnitsSold = exactDelta;
-      hasRealDelta = true;
-    } else {
-      let scaledFromShorter: number | null = null;
-      if (snapshots && snapshots.length >= 2) {
-        for (const shorter of [180, 90, 30, 14, 7].filter(
-          (d) => d < periodDays,
-        )) {
-          const sd = calculateSnapshotDelta(snapshots, shorter);
-          if (sd != null && sd > 0) {
-            scaledFromShorter = Math.min(
-              Math.round(sd * (periodDays / shorter)),
-              soldCount,
-            );
-            break;
-          }
+    let scaledFromShorter: number | null = null;
+    if (snapshots && snapshots.length >= 2) {
+      for (const shorter of [180, 90, 30, 14, 7].filter(
+        (d) => d < periodDays,
+      )) {
+        const sd = calculateSnapshotDelta(snapshots, shorter);
+        if (sd != null && sd > 0) {
+          scaledFromShorter = Math.min(
+            Math.round(sd * (periodDays / shorter)),
+            soldCount,
+          );
+          break;
         }
       }
+    }
 
-      // Conversion rate estimation
-      let impliedRate =
-        totalViews > 10000 && soldCount > 10
-          ? Math.max(0.0005, Math.min(0.08, soldCount / totalViews))
-          : periodViews > 10000000
-            ? 0.0008
-            : periodViews > 1000000
-              ? 0.0015
-              : periodViews > 100000
-                ? 0.003
-                : periodViews > 10000
-                  ? 0.005
-                  : 0.008;
+    // Conversion rate estimation
+    let impliedRate =
+      totalViews > 10000 && soldCount > 10
+        ? Math.max(0.0005, Math.min(0.08, soldCount / totalViews))
+        : periodViews > 10000000
+          ? 0.0008
+          : periodViews > 1000000
+            ? 0.0015
+            : periodViews > 100000
+              ? 0.003
+              : periodViews > 10000
+                ? 0.005
+                : 0.008;
 
-      const recency =
-        periodDays <= 7
-          ? 1.5
-          : periodDays <= 14
-            ? 1.3
-            : periodDays <= 30
-              ? 1.15
-              : 1.0;
+    const recency =
+      periodDays <= 7
+        ? 1.5
+        : periodDays <= 14
+          ? 1.3
+          : periodDays <= 30
+            ? 1.15
+            : 1.0;
 
-      let velocityEstimate = Math.round(periodViews * impliedRate * recency);
-      const expectedRatio = Math.min(1, periodDays / 365);
-      const velocityRatio =
-        totalViews > 0 ? periodViews / totalViews : 0;
-      const momentum = Math.min(5, velocityRatio / expectedRatio);
-      if (momentum > 1) {
-        velocityEstimate = Math.round(
-          velocityEstimate * Math.min(momentum, 2.5),
-        );
-      }
-
-      const maxFraction =
-        periodDays <= 7
-          ? 0.15
-          : periodDays <= 14
-            ? 0.25
-            : periodDays <= 30
-              ? 0.4
-              : periodDays <= 90
-                ? 0.65
-                : 0.85;
-      velocityEstimate = Math.min(
-        velocityEstimate,
-        Math.round(soldCount * maxFraction),
+    let velocityEstimate = Math.round(periodViews * impliedRate * recency);
+    const expectedRatio = Math.min(1, periodDays / 365);
+    const velocityRatio =
+      totalViews > 0 ? periodViews / totalViews : 0;
+    const momentum = Math.min(5, velocityRatio / expectedRatio);
+    if (momentum > 1) {
+      velocityEstimate = Math.round(
+        velocityEstimate * Math.min(momentum, 2.5),
       );
+    }
 
-      let simpleVelocity =
-        totalViews > 0
-          ? Math.round(soldCount * (periodViews / totalViews) * recency)
-          : 0;
-      simpleVelocity = Math.min(
-        simpleVelocity,
-        Math.round(soldCount * maxFraction),
-      );
+    const maxFraction =
+      periodDays <= 7
+        ? 0.15
+        : periodDays <= 14
+          ? 0.25
+          : periodDays <= 30
+            ? 0.4
+            : periodDays <= 90
+              ? 0.65
+              : 0.85;
+    velocityEstimate = Math.min(
+      velocityEstimate,
+      Math.round(soldCount * maxFraction),
+    );
 
+    let simpleVelocity =
+      totalViews > 0
+        ? Math.round(soldCount * (periodViews / totalViews) * recency)
+        : 0;
+    simpleVelocity = Math.min(
+      simpleVelocity,
+      Math.round(soldCount * maxFraction),
+    );
+
+    estPeriodUnitsSold = Math.max(
+      scaledFromShorter || 0,
+      velocityEstimate,
+      simpleVelocity,
+    );
+
+    if (estPeriodUnitsSold === 0 && soldCount > 0 && periodViews > 0) {
       estPeriodUnitsSold = Math.max(
-        scaledFromShorter || 0,
-        velocityEstimate,
-        simpleVelocity,
+        1,
+        Math.round(
+          soldCount * (periodDays / Math.max(daysActive, periodDays)) * 0.5,
+        ),
       );
-
-      if (estPeriodUnitsSold === 0 && soldCount > 0 && periodViews > 0) {
-        estPeriodUnitsSold = Math.max(
-          1,
-          Math.round(
-            soldCount * (periodDays / Math.max(daysActive, periodDays)) * 0.5,
-          ),
-        );
-      }
     }
   }
 
@@ -222,16 +225,38 @@ function estimateProductMetrics(
   };
 }
 
-async function computeTopProducts(
-  nicheSlug: string,
-  days: number,
-): Promise<any[]> {
+function getAdminClient() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error('Missing Supabase env vars');
-  const supabase = createClient(url, key, {
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+// Read the daily precomputed ranking (top-N enriched products) written by
+// pipeline/precompute-rankings.ts. Returns null if the table/row isn't there
+// yet, so the handler transparently falls back to live computation.
+async function readPrecomputed(nicheSlug: string, days: number): Promise<any[] | null> {
+  try {
+    const supabase = getAdminClient();
+    const { data, error } = await supabase
+      .from('rankings_cache')
+      .select('payload')
+      .eq('cache_key', `products:${nicheSlug}:${days}`)
+      .maybeSingle();
+    if (error || !data || !Array.isArray((data as any).payload)) return null;
+    return (data as any).payload as any[];
+  } catch {
+    return null;
+  }
+}
+
+export async function computeTopProducts(
+  nicheSlug: string,
+  days: number,
+): Promise<any[]> {
+  const supabase = getAdminClient();
 
   // 1. Fetch products with sales
   let products: any[] = [];
@@ -332,8 +357,8 @@ export default async function handler(
   try {
     const nicheSlug = (req.query.niche as string) || 'all';
     const days = parseInt((req.query.days as string) || '7', 10);
-    const page = parseInt((req.query.page as string) || '1', 10);
-    const limit = parseInt((req.query.limit as string) || '50', 10);
+    const page = Math.max(1, parseInt((req.query.page as string) || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '50', 10) || 50));
     const sortBy = (req.query.sort as string) || 'estRevenue';
     const sortDir = (req.query.dir as string) || 'desc';
 
@@ -348,7 +373,10 @@ export default async function handler(
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       products = cached.products;
     } else {
-      products = await computeTopProducts(nicheSlug, days);
+      // Prefer the daily precomputed ranking (instant read). Fall back to live
+      // computation only if this niche/timeframe hasn't been precomputed yet.
+      const pre = await readPrecomputed(nicheSlug, days);
+      products = pre ?? (await computeTopProducts(nicheSlug, days));
       cache.set(cacheKey, { products, timestamp: Date.now() });
     }
 

@@ -15,22 +15,24 @@ const FEATURE_MESSAGES: Record<string, string> = {
 
 export function PaywallModal() {
   const { paywallVisible, paywallFeature, closePaywall, markStripeOpened } = useSubscription();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [promoCode, setPromoCode] = useState('');
   const [loadingPlan, setLoadingPlan] = useState<'monthly' | 'annual' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleCheckout(plan: 'monthly' | 'annual') {
-    if (!user?.id || loadingPlan) return;
+    if (!user?.id || !session?.access_token || loadingPlan) return;
     setLoadingPlan(plan);
     setError(null);
     try {
       const res = await fetch('/api/create-checkout-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           plan,
-          user_id: user.id,
           email: user.email,
           ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
         }),

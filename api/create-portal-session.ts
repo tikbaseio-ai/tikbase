@@ -8,9 +8,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { user_id } = (req.body ?? {}) as { user_id?: string };
-    if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
     const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) {
@@ -20,6 +17,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    // Identify the caller from the verified access token — never trust a
+    // client-supplied user_id. Trusting it let anyone mint another customer's
+    // Stripe billing-portal link (view/cancel their subscription).
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !authData.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const user_id = authData.user.id;
+
     const { data, error } = await supabase.auth.admin.getUserById(user_id);
     if (error || !data.user) {
       return res.status(404).json({ error: 'No subscription found for this user' });

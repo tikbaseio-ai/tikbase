@@ -4,13 +4,13 @@ import { useAuth } from '@/lib/auth';
 import { useSubscription } from '@/hooks/use-subscription';
 
 export default function BillingPage() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { isPaid } = useSubscription();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   async function handleManageSubscription() {
-    if (!user?.id) {
+    if (!user?.id || !session?.access_token) {
       setError('You must be signed in');
       return;
     }
@@ -19,8 +19,11 @@ export default function BillingPage() {
     try {
       const res = await fetch('/api/create-portal-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) {

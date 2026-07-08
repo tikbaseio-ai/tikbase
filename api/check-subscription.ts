@@ -9,9 +9,6 @@ const ACTIVE_STATUSES = new Set(['active', 'trialing', 'past_due']);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const userId = req.query.user_id as string | undefined;
-    if (!userId) return res.json({ isPaid: false });
-
     const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) return res.json({ isPaid: false });
@@ -19,6 +16,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    // Derive the user from the verified access token — never trust a
+    // client-supplied user_id (that would let anyone read any user's status).
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return res.json({ isPaid: false });
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !authData.user) return res.json({ isPaid: false });
+    const userId = authData.user.id;
+
     const { data, error } = await supabase.auth.admin.getUserById(userId);
     if (error || !data.user) return res.json({ isPaid: false });
 

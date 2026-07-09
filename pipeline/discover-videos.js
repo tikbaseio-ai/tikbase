@@ -103,20 +103,60 @@ async function main() {
   const startTime = Date.now();
   console.log(`discover-videos started at ${new Date().toISOString()}\n`);
 
-  // Fetch top 100 products by sold_count (with actual sales data)
-  const { data: products, error } = await supabase
-    .from("products")
-    .select("product_id, title, sold_count")
-    .gt("sold_count", 0)
-    .order("sold_count", { ascending: false })
-    .limit(100);
+  // Target the products that actually appear in the rankings users see but
+  // have too few videos to estimate reliably. We read the precomputed
+  // rankings_cache (exactly what the site displays), collect under-covered
+  // products, and prioritise the highest-ranked ones by revenue.
+  //
+  // The old version only covered the top 100 by lifetime sold_count — those
+  // are already video-rich mega-sellers and are rarely what ranks by revenue,
+  // so high-revenue products (e.g. a $160 car seat with 1 video) never got
+  // discovery and stayed stuck at 1 video.
+  const MIN_VIDEOS = Number(process.env.DISCOVER_MIN_VIDEOS) || 3;
+  const DISCOVER_LIMIT = Number(process.env.DISCOVER_LIMIT) || 400;
+
+  // List the ranking keys first (lightweight — no payloads), then read each
+  // payload individually. Fetching all payloads at once times out because each
+  // is a large 400-product JSON blob.
+  const { data: keyRows, error } = await supabase
+    .from("rankings_cache")
+    .select("cache_key")
+    .like("cache_key", "products:%");
 
   if (error) {
-    console.error("Error fetching products:", error.message);
+    console.error("Error reading rankings_cache:", error.message);
     process.exit(1);
   }
 
-  console.log(`Found ${products.length} top products to discover videos for\n`);
+  // Dedupe by product_id across all niche/timeframe rankings, keeping the
+  // highest estimated revenue seen (so we discover top-displayed products first).
+  const candidates = new Map();
+  for (const { cache_key } of keyRows || []) {
+    const { data: one, error: rowErr } = await supabase
+      .from("rankings_cache")
+      .select("payload")
+      .eq("cache_key", cache_key)
+      .maybeSingle();
+    if (rowErr || !one) continue;
+    for (const p of one.payload || []) {
+      if (!p || !p.product_id) continue;
+      const vidCount = Array.isArray(p.topVideos) ? p.topVideos.length : 0;
+      if (vidCount >= MIN_VIDEOS) continue; // already has enough videos
+      const score = p.metrics?.estRevenue || 0;
+      const prev = candidates.get(p.product_id);
+      if (!prev || score > prev.score) {
+        candidates.set(p.product_id, { product_id: p.product_id, title: p.title, score });
+      }
+    }
+  }
+
+  const products = [...candidates.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, DISCOVER_LIMIT);
+
+  console.log(
+    `${candidates.size} under-covered products in rankings (<${MIN_VIDEOS} videos); discovering for top ${products.length} by revenue\n`,
+  );
 
   const allNewVideos = [];
   let queriesRun = 0;
@@ -228,39 +268,44 @@ async function main() {
     }
   }
 
-  // Also update view_count for existing videos that may have grown
-  console.log("\nUpdating view counts for existing top videos...");
+  // Optional thumbnail refresh via TikTok oEmbed. OFF by default: oEmbed calls
+  // are slow/unreliable and previously ran with no timeout on every video,
+  // stalling the job for hours. When enabled, it is hard-bounded by a
+  // per-request timeout and a total-call cap so it can never hang the pipeline.
   let updated = 0;
-  for (const product of products.slice(0, 50)) {
-    const { data: vids } = await supabase
-      .from("product_videos")
-      .select("id, video_url, view_count")
-      .eq("product_id", product.product_id);
+  if (process.env.REFRESH_THUMBNAILS === "1") {
+    const OEMBED_TIMEOUT_MS = 5000;
+    const OEMBED_MAX_CALLS = Number(process.env.OEMBED_MAX_CALLS) || 300;
+    let calls = 0;
+    console.log("\nRefreshing thumbnails via oEmbed (bounded)...");
+    outer: for (const product of products.slice(0, 50)) {
+      const { data: vids } = await supabase
+        .from("product_videos")
+        .select("id, video_url, cover_image_url")
+        .eq("product_id", product.product_id);
 
-    for (const vid of vids || []) {
-      const vidIdMatch = vid.video_url?.match(/video\/(\d+)/);
-      if (!vidIdMatch) continue;
-
-      try {
-        // Use TikTok oEmbed to get current view count (free, no API key)
-        const oembedRes = await fetch(
-          `https://www.tiktok.com/oembed?url=${encodeURIComponent(vid.video_url)}`
-        );
-        if (!oembedRes.ok) continue;
-        const oembed = await oembedRes.json();
-
-        // oEmbed doesn't return view count directly, but we can at least
-        // update the thumbnail
-        if (oembed?.thumbnail_url && oembed.thumbnail_url !== vid.cover_image_url) {
-          await supabase
-            .from("product_videos")
-            .update({ cover_image_url: oembed.thumbnail_url })
-            .eq("id", vid.id);
-          updated++;
+      for (const vid of vids || []) {
+        if (calls >= OEMBED_MAX_CALLS) break outer;
+        if (!vid.video_url?.match(/video\/(\d+)/)) continue;
+        calls++;
+        try {
+          const oembedRes = await fetch(
+            `https://www.tiktok.com/oembed?url=${encodeURIComponent(vid.video_url)}`,
+            { signal: AbortSignal.timeout(OEMBED_TIMEOUT_MS) },
+          );
+          if (!oembedRes.ok) continue;
+          const oembed = await oembedRes.json();
+          if (oembed?.thumbnail_url && oembed.thumbnail_url !== vid.cover_image_url) {
+            await supabase
+              .from("product_videos")
+              .update({ cover_image_url: oembed.thumbnail_url })
+              .eq("id", vid.id);
+            updated++;
+          }
+        } catch {
+          // timeout or network error — skip
         }
         await sleep(100);
-      } catch {
-        // skip
       }
     }
   }

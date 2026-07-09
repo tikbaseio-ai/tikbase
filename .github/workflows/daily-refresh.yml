@@ -8,7 +8,7 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
@@ -29,11 +29,15 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node pipeline/tikbase-daily-refresh.js
 
+      # Deepen video coverage for under-covered ranked products. Capped at 150/day
+      # to fit the job budget; it progressively clears the backlog since covered
+      # products are skipped on subsequent runs.
       - name: Discover videos for top products
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DISCOVER_LIMIT: "150"
         run: node pipeline/discover-videos.js
 
       # Precompute Top Products/Videos rankings into rankings_cache so the API

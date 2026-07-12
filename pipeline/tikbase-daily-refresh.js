@@ -5,7 +5,7 @@
  * and writes to Supabase. 5 phases:
  *   1. Keyword Video Discovery
  *   2. Shop Search Enrichment
- *   3. Snapshot All Products
+ *   3. Snapshot All Products (+ mine related_videos from the same responses)
  *   4. Fill Missing Prices
  *   5. Refresh Thumbnails
  *
@@ -83,6 +83,8 @@ const stats = {
   phase1_products: 0,
   phase2_products: 0,
   phase3_snapshots: 0,
+  phase3_related_inserted: 0,
+  phase3_related_updated: 0,
   phase4_prices_filled: 0,
   phase5_thumbnails: 0,
 };
@@ -678,7 +680,8 @@ async function phase2() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 — Snapshot All Products
+// Phase 3 — Snapshot All Products (and mine related_videos, a bonus payload
+// already present in each Product Details response — see upsertRelatedVideos).
 // ---------------------------------------------------------------------------
 
 // Raw product-detail fetch (does not throw on non-2xx) so we can distinguish
@@ -710,6 +713,159 @@ async function snapshotPool(items, concurrency, worker) {
     }
   }
   await Promise.all(Array.from({ length: concurrency }, runner));
+}
+
+// --- related_videos mining helpers -----------------------------------------
+// The Product Details response (fetched for every tracked product in Phase 3)
+// carries a `related_videos` array — the videos TikTok associates with the
+// product. We persist it into product_videos at zero extra API cost.
+
+// Numeric TikTok video id from a video URL. This is the dedup key (NOT the full
+// URL): the same video's URL differs by source — related_videos uses
+// @<author_id> while keyword rows use @<handle> — but the /video/<id> segment is
+// identical. Validated: 100% of a 500-row live sample matched, all 19-digit ids.
+function extractVideoId(url) {
+  const m = String(url || "").match(/video\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+const toIntOrNull = (v) => {
+  const n = Number(String(v ?? "").replace(/[^0-9]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+// related_videos.upload_time is unix SECONDS (string) -> ISO timestamptz, or null.
+function uploadTimeToISO(v) {
+  const s = Number(String(v ?? "").replace(/[^0-9]/g, ""));
+  if (!Number.isFinite(s) || s <= 0) return null;
+  const d = new Date(s * 1000);
+  const y = d.getUTCFullYear();
+  if (y < 2015 || y > 2035) return null; // guard against junk timestamps
+  return d.toISOString();
+}
+
+// Persist related_videos into product_videos. Dedup is keyed on the numeric
+// video id (video_id column, backfilled + a unique index on (product_id,
+// video_id)), so related rows correctly match keyword rows for the same video
+// despite differing URL formats. INSERTs new videos with
+// discovery_source='related_videos' and video_id set; a unique-constraint hit
+// (concurrent/edge case) is a benign skip (ON CONFLICT DO NOTHING). UPDATEs
+// existing rows' view/like counts ONLY when the incoming value is higher
+// (monotonic). Never downgrades counts, never rewrites
+// video_url/discovery_source/posted_at on existing rows, never deletes.
+// Idempotent across same-day re-runs. Returns aggregate + per-product stats.
+async function upsertRelatedVideos(relatedByProduct) {
+  const s = { products: relatedByProduct.size, candidates: 0, inserted: 0, updated: 0, skipped: 0, constraintSkipped: 0, perProduct: [] };
+  if (relatedByProduct.size === 0) return s;
+
+  // 1. Build candidate rows, deduped per product by video id.
+  const byProduct = new Map(); // productId -> Map<videoId, candidate row>
+  for (const [productId, entries] of relatedByProduct) {
+    const m = new Map();
+    for (const e of entries || []) {
+      const videoId = e?.item_id ? String(e.item_id) : extractVideoId(e?.url);
+      if (!videoId) continue;
+      const url = e?.url || `https://www.tiktok.com/@${e?.author_id || "user"}/video/${videoId}`;
+      const cand = {
+        product_id: String(productId),
+        video_id: videoId, // explicit — column is plain (backfilled), unique (product_id, video_id)
+        video_url: url,
+        view_count: toIntOrNull(e?.play_count),
+        like_count: toIntOrNull(e?.like_count),
+        author_name: e?.author_name || null,
+        author_avatar_url: e?.author_avatar_url || null,
+        cover_image_url: e?.cover_image_url || null,
+        ad_label: e?.bc_ad_label_text || null,
+        posted_at: uploadTimeToISO(e?.upload_time),
+        discovery_source: "related_videos",
+      };
+      const prev = m.get(videoId); // keep higher-count copy if duplicated in payload
+      if (!prev || (cand.view_count || 0) > (prev.view_count || 0)) m.set(videoId, cand);
+    }
+    if (m.size) { byProduct.set(String(productId), m); s.candidates += m.size; }
+  }
+  if (byProduct.size === 0) return s;
+
+  // 2. Fetch existing rows for these products (indexed by product_id) and map
+  //    them by extracted video id so dedup ignores URL-format differences.
+  // A tracked product can have hundreds of existing videos, and a chunk of
+  // products can total far more than PostgREST's 1000-row default cap — so we
+  // MUST paginate each chunk with .range(), or the dedup map silently misses
+  // rows and misclassifies existing videos as inserts.
+  const productIds = [...byProduct.keys()];
+  const existing = new Map(); // productId -> Map<videoId, { id, view_count, like_count }>
+  const PAGE = 1000;
+  for (let i = 0; i < productIds.length; i += 100) {
+    const chunk = productIds.slice(i, i + 100);
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("product_videos")
+        .select("id, product_id, video_id, video_url, view_count, like_count")
+        .in("product_id", chunk)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error("fetch existing: " + error.message);
+      if (!data?.length) break;
+      for (const row of data) {
+        // Prefer the DB video_id (matches the unique index); fall back to URL
+        // extraction for any keyword rows still carrying a null video_id.
+        const vid = row.video_id || extractVideoId(row.video_url);
+        if (!vid) continue;
+        if (!existing.has(row.product_id)) existing.set(row.product_id, new Map());
+        existing.get(row.product_id).set(vid, row);
+      }
+      if (data.length < PAGE) break;
+    }
+  }
+
+  // 3. Partition into inserts (new id) and monotonic updates (count rose),
+  //    tracking per-product counts (before = existing video coverage).
+  const inserts = [];
+  const updates = []; // { id, fields }
+  for (const [productId, m] of byProduct) {
+    const ex = existing.get(productId) || new Map();
+    let pi = 0, pu = 0, pun = 0;
+    for (const [videoId, cand] of m) {
+      const prior = ex.get(videoId);
+      if (!prior) { inserts.push(cand); pi++; continue; }
+      const fields = {};
+      if (cand.view_count != null && cand.view_count > (prior.view_count || 0)) fields.view_count = cand.view_count;
+      if (cand.like_count != null && cand.like_count > (prior.like_count || 0)) fields.like_count = cand.like_count;
+      if (Object.keys(fields).length) { updates.push({ id: prior.id, fields }); pu++; }
+      else { s.skipped++; pun++; }
+    }
+    s.perProduct.push({ productId, before: ex.size, inserts: pi, updates: pu, unchanged: pun });
+  }
+
+  // 4. Insert new rows in chunks. App-level dedup (step 3) already excludes any
+  //    existing (product_id, video_id), so plain inserts succeed. The unique
+  //    index is a physical backstop: a genuine duplicate (concurrent/edge) raises
+  //    23505, which we treat as a benign skip by retrying that chunk row-by-row.
+  //    (We deliberately avoid PostgREST's onConflict arbiter inference, which is
+  //    fragile right after the index DDL — stale schema cache -> 42P10.)
+  for (let i = 0; i < inserts.length; i += 500) {
+    const chunk = inserts.slice(i, i + 500);
+    const { error } = await supabase.from("product_videos").insert(chunk);
+    if (!error) { s.inserted += chunk.length; continue; }
+    if (error.code === "23505") {
+      for (const row of chunk) {
+        const { error: e2 } = await supabase.from("product_videos").insert(row);
+        if (!e2) s.inserted++;
+        else if (e2.code === "23505") s.constraintSkipped++; // row exists = benign skip
+        else console.error("  [WARN] related insert row failed:", e2.message);
+      }
+    } else {
+      console.error("  [WARN] related insert chunk failed:", error.message);
+    }
+  }
+
+  // 5. Apply monotonic count updates via a bounded pool (PK-indexed, parallel).
+  await snapshotPool(updates, SNAPSHOT_CONCURRENCY, async (u) => {
+    const { error } = await supabase.from("product_videos").update(u.fields).eq("id", u.id);
+    if (error) console.error("  [WARN] related update failed:", error.message);
+    else s.updated++;
+  });
+
+  return s;
 }
 
 async function phase3(limitOverride) {
@@ -746,12 +902,21 @@ async function phase3(limitOverride) {
 
   const snapshots = [];
   const deadIds = [];
+  const relatedByProduct = new Map(); // productId -> related_videos[] (bonus payload)
   let fetched = 0, p404 = 0, errors = 0;
 
   await snapshotPool(trackedSet, SNAPSHOT_CONCURRENCY, async (productId) => {
     const r = await fetchProductDetailRaw(productId);
     if (r.status === 404) { p404++; deadIds.push(productId); return; }
     if (r.status !== 200 || !r.json) { errors++; return; }
+
+    // Stash related_videos from the SAME response (zero extra API cost). Fully
+    // guarded so nothing here can disrupt snapshot capture below. Written to the
+    // DB only after snapshots are persisted (see below).
+    try {
+      const rv = r.json.related_videos;
+      if (Array.isArray(rv) && rv.length) relatedByProduct.set(String(productId), rv);
+    } catch { /* related_videos is a bonus; never let it affect snapshots */ }
 
     const pb = r.json.product_base;
     const soldCount = pb?.sold_count != null ? pb.sold_count : null;
@@ -801,6 +966,37 @@ async function phase3(limitOverride) {
       .update({ price_unavailable: true })
       .in("product_id", chunk);
     if (error) console.error("  [ERROR] mark unavailable:", error.message);
+  }
+
+  // Bonus payload: persist related_videos mined from the Product Details
+  // responses we already paid for. Fully isolated — any failure here (including
+  // the new columns not yet existing) logs and continues; the snapshots written
+  // above are the crown jewels and are never affected.
+  try {
+    const rel = await upsertRelatedVideos(relatedByProduct);
+    stats.phase3_related_inserted = rel.inserted;
+    stats.phase3_related_updated = rel.updated;
+    console.log(
+      `  Phase 3 related_videos: ${rel.inserted} inserted, ${rel.updated} updated, ${rel.skipped} unchanged, ` +
+      `${rel.constraintSkipped} dup-skipped (from ${rel.products} products, ${rel.candidates} candidate videos)`
+    );
+    // On scoped verification runs (--phase3-only N), print a per-product table
+    // and a before/after ≥1-video coverage summary. Suppressed on full cron runs.
+    if (limitOverride != null && rel.perProduct.length) {
+      const withCoverageBefore = rel.perProduct.filter((p) => p.before > 0).length;
+      const withCoverageAfter = rel.perProduct.filter((p) => p.before + p.inserts > 0).length;
+      console.log(`\n  --- per-product (${rel.perProduct.length} products) ---`);
+      console.log("  product_id            before  inserts  updates  unchanged  after");
+      for (const p of rel.perProduct.sort((a, b) => b.inserts - a.inserts)) {
+        console.log(
+          `  ${String(p.productId).padEnd(20)} ${String(p.before).padStart(6)} ${String(p.inserts).padStart(8)} ` +
+          `${String(p.updates).padStart(8)} ${String(p.unchanged).padStart(10)} ${String(p.before + p.inserts).padStart(6)}`
+        );
+      }
+      console.log(`\n  Coverage (>=1 video): before ${withCoverageBefore}/${rel.perProduct.length} -> after ${withCoverageAfter}/${rel.perProduct.length}`);
+    }
+  } catch (e) {
+    console.error("  [WARN] related_videos mining failed (snapshots unaffected):", e.message);
   }
 
   console.log(`  Phase 3 done: ${stats.phase3_snapshots} snapshots created (fresh-fetched)`);
@@ -982,6 +1178,8 @@ async function main() {
   console.log(`  Phase 1 — Products from videos: ${stats.phase1_products}`);
   console.log(`  Phase 2 — Products from shop:   ${stats.phase2_products}`);
   console.log(`  Phase 3 — Snapshots created:    ${stats.phase3_snapshots}`);
+  console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
+  console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);
   console.log(`  Phase 5 — Thumbnails refreshed: ${stats.phase5_thumbnails}`);
   console.log(`\n  Total time: ${elapsed}s`);

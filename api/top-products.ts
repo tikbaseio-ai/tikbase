@@ -103,7 +103,18 @@ function estimateProductMetrics(
   }
 
   const soldCount = product.sold_count || 0;
-  const price = product.sale_price || 0;
+  // Price: prefer products.sale_price, then fall back to the freshest snapshot's
+  // sale_price (Phase 3 writes it daily, and the snapshots are already loaded
+  // here), and only then the category median. A snapshot price is a real fetched
+  // price — just stored in a different table — so hasRealPrice is true for it too.
+  const latestSnapPrice = (() => {
+    if (!snapshots?.length) return null;
+    const latest = [...snapshots].sort((a, b) =>
+      a.snapshot_date.localeCompare(b.snapshot_date)).at(-1);
+    const sp = latest?.sale_price ?? 0;
+    return sp > 0 ? sp : null;
+  })();
+  const price = product.sale_price > 0 ? product.sale_price : (latestSnapPrice ?? 0);
   const effectivePrice = price > 0 ? price : categoryMedianPrice;
   const hasRealPrice = price > 0;
 

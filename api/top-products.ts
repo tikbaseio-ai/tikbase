@@ -102,7 +102,17 @@ function estimateProductMetrics(
     }
   }
 
-  const soldCount = product.sold_count || 0;
+  // sold_count: the products-table row can lag the fresh daily snapshot; since
+  // sold_count is cumulative (monotonic), take the higher of the two. Feeds the
+  // maxFraction caps and the displayed lifetime-sold — same snapshot-fallback
+  // idea as the price fallback below.
+  const soldCount = (() => {
+    const base = product.sold_count || 0;
+    if (!snapshots?.length) return base;
+    const latest = [...snapshots].sort((a, b) =>
+      a.snapshot_date.localeCompare(b.snapshot_date)).at(-1);
+    return Math.max(base, latest?.sold_count ?? 0);
+  })();
   // Price: prefer products.sale_price, then fall back to the freshest snapshot's
   // sale_price (Phase 3 writes it daily, and the snapshots are already loaded
   // here), and only then the category median. A snapshot price is a real fetched

@@ -491,25 +491,31 @@ async function phase1() {
 
           const videoUrl =
             `https://www.tiktok.com/@${video?.author?.unique_id || video?.author?.uniqueId || "user"}/video/${video?.aweme_id || video?.id}`;
+          const videoId = extractVideoId(videoUrl);
 
-          const videoRecord = {
-            product_id: String(productId),
-            video_url: videoUrl,
-            view_count: viewCount,
-            author_name:
-              video?.author?.nickname ||
-              video?.author?.unique_id ||
-              null,
-            author_avatar_url:
-              video?.author?.avatar_medium?.url_list?.[0] ||
-              video?.author?.avatar_thumb?.url_list?.[0] ||
-              null,
-            cover_image_url:
-              video?.video?.cover?.url_list?.[0] ||
-              video?.video?.origin_cover?.url_list?.[0] ||
-              null,
-          };
-          videosToUpsert.push(videoRecord);
+          // Skip videos whose id can't be extracted (malformed URL): they can't
+          // be deduplicated against the (product_id, video_id) unique index and
+          // would otherwise slip in as un-dedupable rows.
+          if (videoId) {
+            videosToUpsert.push({
+              product_id: String(productId),
+              video_id: videoId,
+              video_url: videoUrl,
+              view_count: viewCount,
+              author_name:
+                video?.author?.nickname ||
+                video?.author?.unique_id ||
+                null,
+              author_avatar_url:
+                video?.author?.avatar_medium?.url_list?.[0] ||
+                video?.author?.avatar_thumb?.url_list?.[0] ||
+                null,
+              cover_image_url:
+                video?.video?.cover?.url_list?.[0] ||
+                video?.video?.origin_cover?.url_list?.[0] ||
+                null,
+            });
+          }
 
           // Extract product info from anchor
           const productTitle = shopExtra?.keyword || shopExtra?.title || null;
@@ -545,37 +551,37 @@ async function phase1() {
     else stats.phase1_products = dedupedProducts.length;
   }
 
-  // Upsert videos
+  // Insert videos
   if (videosToUpsert.length > 0) {
-    // Dedupe by video_url
+    // Dedupe by (product_id, video_id) — the real unique key. The same video's
+    // URL differs by source (@handle vs @author_id, share params), so a
+    // video_url check misses already-stored duplicates; the extracted video_id
+    // does not.
     const dedupedVideos = Object.values(
       videosToUpsert.reduce((acc, v) => {
-        acc[v.video_url] = v;
+        acc[`${v.product_id}:${v.video_id}`] = v;
         return acc;
       }, {})
     );
 
-    // Batch upsert in chunks of 500
-    // product_videos has no unique constraint on video_url, so we check
-    // which URLs already exist and only insert new ones.
-    const allUrls = dedupedVideos.map((v) => v.video_url);
-    const existingUrls = new Set();
-    for (let i = 0; i < allUrls.length; i += 500) {
-      const batch = allUrls.slice(i, i + 500);
-      const { data: existing } = await supabase
-        .from("product_videos")
-        .select("video_url")
-        .in("video_url", batch);
-      if (existing) existing.forEach((r) => existingUrls.add(r.video_url));
-    }
-    const newVideos = dedupedVideos.filter((v) => !existingUrls.has(v.video_url));
-    for (let i = 0; i < newVideos.length; i += 500) {
-      const chunk = newVideos.slice(i, i + 500);
-      const { error } = await supabase
-        .from("product_videos")
-        .insert(chunk);
-      if (error) console.error("  [ERROR] Videos insert:", error.message);
-      else stats.phase1_videos += chunk.length;
+    // Insert in chunks; on a unique-violation (a video_id already stored for
+    // this product) retry the chunk row-by-row so the duplicate is skipped
+    // without aborting — and dropping — the chunk's genuinely-new rows. The
+    // (product_id, video_id) unique index is partial (video_id IS NOT NULL), so
+    // ON CONFLICT / upsert can't target it; this mirrors the related_videos path.
+    for (let i = 0; i < dedupedVideos.length; i += 500) {
+      const chunk = dedupedVideos.slice(i, i + 500);
+      const { error } = await supabase.from("product_videos").insert(chunk);
+      if (!error) { stats.phase1_videos += chunk.length; continue; }
+      if (error.code === "23505") {
+        for (const row of chunk) {
+          const { error: e2 } = await supabase.from("product_videos").insert(row);
+          if (!e2) stats.phase1_videos++;
+          else if (e2.code !== "23505") console.error("  [WARN] video insert:", e2.message);
+        }
+      } else {
+        console.error("  [ERROR] Videos insert:", error.message);
+      }
     }
   }
 

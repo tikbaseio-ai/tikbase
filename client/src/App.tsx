@@ -9,6 +9,7 @@ import { SubscriptionProvider } from "@/hooks/use-subscription";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { PaywallModal } from "@/components/PaywallModal";
 import AppSidebar from "@/components/AppSidebar";
+import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
 import ProductsPage from "@/pages/products";
 import SavedPage from "@/pages/saved";
@@ -35,6 +36,7 @@ function DashboardLayout() {
       <main className="flex-1 ml-[220px] min-h-screen">
         <Switch>
           <Route path="/dashboard" component={() => <ProtectedRoute component={VideosPage} />} />
+          <Route path="/dashboard/overview" component={() => <ProtectedRoute component={OverviewPage} />} />
           <Route path="/dashboard/products" component={() => <ProtectedRoute component={ProductsPage} />} />
           <Route path="/dashboard/saved" component={() => <ProtectedRoute component={SavedPage} />} />
           <Route path="/dashboard/plans" component={() => <ProtectedRoute component={PlansPage} />} />

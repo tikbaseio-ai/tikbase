@@ -234,6 +234,9 @@ async function main() {
             author_avatar_url:
               video?.author?.avatar_medium?.url_list?.[0] || null,
             cover_image_url: video?.video?.cover?.url_list?.[0] || null,
+            // Tag provenance so this path can be isolated from Phase 1 keyword
+            // discovery (which leaves discovery_source at its 'keyword' default).
+            discovery_source: "discover_videos",
           });
 
           foundForProduct++;

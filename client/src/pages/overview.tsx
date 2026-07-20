@@ -185,11 +185,12 @@ export default function OverviewPage() {
                 {videos.map((video, idx) => {
                   const rank = idx + 1;
                   const postDate = extractPostDate(video.video_url);
+                  const vidId = video.video_url?.match(/video\/(\d+)/)?.[1];
                   return (
                     <div key={video.id} className="rounded-lg border border-border bg-card overflow-hidden" data-testid={`overview-video-${rank}`}>
                       <div className="relative aspect-[9/16] max-h-[220px] overflow-hidden bg-muted">
-                        {video.cover_image_url ? (
-                          <img src={video.cover_image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        {(vidId || video.cover_image_url) ? (
+                          <img src={vidId ? `/api/thumb?vid=${vidId}` : (video.cover_image_url || '')} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />
                         )}

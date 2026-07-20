@@ -189,8 +189,11 @@ export default function VideosPage() {
                   <div key={video.id} className="relative rounded-lg border border-border bg-card overflow-hidden cursor-pointer"
                     onClick={() => showPaywall('top_videos')}>
                     <div className="aspect-[9/16] max-h-[280px] overflow-hidden bg-muted">
-                      {video.cover_image_url && <img src={video.cover_image_url} alt="" className="w-full h-full object-cover blur-md opacity-40" loading="lazy" />}
-                      {!video.cover_image_url && <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />}
+                      {(() => {
+                        const vid = video.video_url?.match(/video\/(\d+)/)?.[1];
+                        const src = vid ? `/api/thumb?vid=${vid}` : video.cover_image_url;
+                        return src ? <img src={src} alt="" className="w-full h-full object-cover blur-md opacity-40" loading="lazy" /> : <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />;
+                      })()}
                     </div>
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="text-center">
@@ -217,9 +220,9 @@ export default function VideosPage() {
                       // Try oEmbed thumbnail as a more reliable fallback
                       const videoId = video.video_url?.match(/video\/(\d+)/)?.[1];
                       const oembedThumb = videoId ? `https://www.tiktok.com/oembed?url=https://www.tiktok.com/@t/video/${videoId}` : null;
-                      return video.cover_image_url ? (
+                      return (video.cover_image_url || videoId) ? (
                         <img
-                          src={video.cover_image_url}
+                          src={videoId ? `/api/thumb?vid=${videoId}` : (video.cover_image_url || '')}
                           alt=""
                           className="w-full h-full object-cover"
                           loading="lazy"

@@ -100,6 +100,11 @@ export function calculateSnapshotDelta(
     (Date.parse(latest.snapshot_date) - Date.parse(baseline.snapshot_date)) / 86400000;
   if (!(spanDays > 0)) return null;
   if (spanDays > periodDays * MAX_SPAN_RATIO) return null;
+  // Symmetric lower bound: a span much SHORTER than the window means the window
+  // is incomplete (a stale `latest` — e.g. snapshots stopped during an outage).
+  // Normalizing would scale the partial delta UP and extrapolate from data we
+  // don't have, so reject and let the estimator handle it instead.
+  if (spanDays < periodDays / MAX_SPAN_RATIO) return null;
 
   return Math.round(unitsDelta * (periodDays / spanDays));
 }

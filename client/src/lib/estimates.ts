@@ -53,6 +53,10 @@ export function getVideoPostDate(videoUrl: string): Date | null {
 }
 
 // Calculate snapshot delta for a product over a period
+// A snapshot delta is only trusted if its true span is within this multiple
+// of the requested window; beyond it we fall through to the estimator.
+const MAX_SPAN_RATIO = 1.5;
+
 export function calculateSnapshotDelta(
   snapshots: SnapshotData[],
   periodDays: number
@@ -86,7 +90,18 @@ export function calculateSnapshotDelta(
     return null; // anomalous data
   }
 
-  return unitsDelta;
+  // The delta spans baseline -> latest, which is NOT necessarily periodDays:
+  // a missing snapshot at the cutoff pushes the baseline older, silently
+  // measuring more days than the window claims (the 07-19/07-20 gap does this
+  // on specific dates). Normalize to the labelled window; if the span is way
+  // off, the reading isn't representative — reject it and let the estimator
+  // handle the product instead of reporting an inflated "real" delta.
+  const spanDays =
+    (Date.parse(latest.snapshot_date) - Date.parse(baseline.snapshot_date)) / 86400000;
+  if (!(spanDays > 0)) return null;
+  if (spanDays > periodDays * MAX_SPAN_RATIO) return null;
+
+  return Math.round(unitsDelta * (periodDays / spanDays));
 }
 
 // ---------------------------------------------------------------------------

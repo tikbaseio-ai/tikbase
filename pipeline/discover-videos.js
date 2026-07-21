@@ -160,6 +160,10 @@ async function main() {
 
   const allNewVideos = [];
   let queriesRun = 0;
+  // Failed calls were previously swallowed with no log and no count, so a
+  // credit wall was indistinguishable from "found nothing". Count them, and
+  // treat a 402 (out of credits) as the account-level outage it is.
+  let apiFailures = 0, credit402 = 0, loggedFailures = 0;
 
   for (const product of products) {
     const queries = generateQueries(product.title);
@@ -242,7 +246,15 @@ async function main() {
           foundForProduct++;
         }
       } catch (err) {
-        // skip failed queries silently
+        apiFailures++;
+        if (/\bAPI 402\b|out of credits/i.test(String(err?.message || ""))) credit402++;
+        // Log the first few verbatim, then suppress: a credit wall fails every
+        // query and would otherwise bury the log in hundreds of identical lines.
+        if (loggedFailures < 5) {
+          loggedFailures++;
+          console.warn(`    [WARN] Query failed for ${product.product_id}: ${err.message}`);
+          if (loggedFailures === 5) console.warn("    [WARN] (further query failures suppressed; see summary)");
+        }
       }
     }
 
@@ -318,8 +330,22 @@ async function main() {
   console.log(`  New videos inserted: ${inserted}`);
   console.log(`  Thumbnails updated:  ${updated}`);
   console.log(`  API queries run:     ${queriesRun}`);
+  console.log(`  API failures:        ${apiFailures} (402 / credit wall: ${credit402})`);
   console.log(`  Total time:          ${elapsed}s`);
   console.log(`\ndiscover-videos completed at ${new Date().toISOString()}`);
+
+  // Exit non-zero on a credit wall: 0 videos because the account is out of
+  // credits is a failure, not a clean "nothing new to find".
+  if (credit402 > 0) {
+    console.error(
+      `\n${"!".repeat(60)}\n` +
+      `CREDIT WALL: ${credit402} of ${apiFailures} failed calls were HTTP 402.\n` +
+      `402 = out of credits OR an invalid/revoked API key (the vendor returns it for both).\n` +
+      `Discovery did NOT run to completion — only ${queriesRun} queries succeeded.\n` +
+      `${"!".repeat(60)}`
+    );
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

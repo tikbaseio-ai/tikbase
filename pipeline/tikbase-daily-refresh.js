@@ -87,7 +87,24 @@ const stats = {
   phase3_related_updated: 0,
   phase4_prices_filled: 0,
   phase5_thumbnails: 0,
+  api_failures: 0,
+  api_402: 0,
 };
+
+// A 402 from ScrapeCreators means the credit balance is exhausted. That is an
+// outage, not a per-item failure, and it must never be able to look like
+// "found nothing" — every phase counts it and the summary shouts about it.
+function isCreditError(err) {
+  return /\bAPI 402\b|out of credits/i.test(String(err?.message || ""));
+}
+
+// Record a failed API call. Returns true if it was a credit (402) failure.
+function recordApiFailure(err) {
+  stats.api_failures++;
+  const credit = isCreditError(err);
+  if (credit) stats.api_402++;
+  return credit;
+}
 
 // ---------------------------------------------------------------------------
 // Niche definitions
@@ -529,6 +546,7 @@ async function phase1() {
           });
         }
       } catch (err) {
+        recordApiFailure(err);
         console.warn(`    [WARN] Query failed "${query}": ${err.message}`);
       }
     }
@@ -659,6 +677,7 @@ async function phase2() {
           });
         }
       } catch (err) {
+        recordApiFailure(err);
         console.warn(`    [WARN] Shop search failed "${term}": ${err.message}`);
       }
     }
@@ -909,12 +928,13 @@ async function phase3(limitOverride) {
   const snapshots = [];
   const deadIds = [];
   const relatedByProduct = new Map(); // productId -> related_videos[] (bonus payload)
-  let fetched = 0, p404 = 0, errors = 0;
+  let fetched = 0, p404 = 0, errors = 0, credit402 = 0;
 
   await snapshotPool(trackedSet, SNAPSHOT_CONCURRENCY, async (productId) => {
     const r = await fetchProductDetailRaw(productId);
     if (r.status === 404) { p404++; deadIds.push(productId); return; }
-    if (r.status !== 200 || !r.json) { errors++; return; }
+    if (r.status === 402) { credit402++; stats.api_failures++; stats.api_402++; return; }
+    if (r.status !== 200 || !r.json) { errors++; stats.api_failures++; return; }
 
     // Stash related_videos from the SAME response (zero extra API cost). Fully
     // guarded so nothing here can disrupt snapshot capture below. Written to the
@@ -943,7 +963,7 @@ async function phase3(limitOverride) {
     fetched++;
   });
 
-  console.log(`  Fetched fresh: ${fetched} | 404 (marked): ${p404} | transient errors: ${errors}`);
+  console.log(`  Fetched fresh: ${fetched} | 404 (marked): ${p404} | transient errors: ${errors} | 402 credit failures: ${credit402}`);
 
   // Write snapshots (preserve composite-key upsert + insert fallback).
   for (let i = 0; i < snapshots.length; i += 500) {
@@ -1099,10 +1119,13 @@ async function phase4() {
         failTracker[p.product_id] = (failTracker[p.product_id] || 0) + 1;
       }
     } catch (err) {
+      const credit = recordApiFailure(err);
       console.warn(
         `    [WARN] Price fetch failed for ${p.product_id}: ${err.message}`
       );
-      failTracker[p.product_id] = (failTracker[p.product_id] || 0) + 1;
+      // A credit wall is not this product's fault — don't spend one of its
+      // three fail-tracker strikes on an account-level outage.
+      if (!credit) failTracker[p.product_id] = (failTracker[p.product_id] || 0) + 1;
     }
   }
 
@@ -1188,7 +1211,20 @@ async function main() {
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);
   console.log(`  Phase 5 — Thumbnails refreshed: ${stats.phase5_thumbnails}`);
+  console.log(`  API failures:                   ${stats.api_failures} (402 / credit wall: ${stats.api_402})`);
   console.log(`\n  Total time: ${elapsed}s`);
+
+  // A credit wall silently zeroes every phase above. Make it impossible to miss.
+  if (stats.api_402 > 0) {
+    console.error(
+      `\n  ${"!".repeat(60)}\n` +
+      `  CREDIT WALL: ${stats.api_402} ScrapeCreators calls failed with HTTP 402.\n` +
+      `  402 = out of credits OR an invalid/revoked API key (the vendor returns it for both).\n` +
+      `  The phase counts above are INCOMPLETE — snapshots/prices/videos were skipped.\n` +
+      `  Top up credits and re-run before trusting today's data.\n` +
+      `  ${"!".repeat(60)}`
+    );
+  }
   console.log(`\ntikbase daily refresh completed at ${new Date().toISOString()}`);
 }
 

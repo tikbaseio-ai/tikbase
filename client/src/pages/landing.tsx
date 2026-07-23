@@ -102,10 +102,10 @@ export default function LandingPage() {
                   <span className="material-symbols-outlined text-[#ddffaf] text-4xl">category</span>
                 </div>
                 <div>
-                  <h3 className="font-['Space_Grotesk'] text-xl font-bold mb-2 text-white">17 Niches Covered</h3>
+                  <h3 className="font-['Space_Grotesk'] text-xl font-bold mb-2 text-white">18 Niches Covered</h3>
                   <p className="text-[#adaaad] text-sm leading-relaxed">From beauty to tech gadgets, we track everything so you don't have to.</p>
                 </div>
-                <div className="hidden md:flex ml-auto font-['IBM_Plex_Mono'] text-[#ddffaf] text-3xl font-bold">17</div>
+                <div className="hidden md:flex ml-auto font-['IBM_Plex_Mono'] text-[#ddffaf] text-3xl font-bold">18</div>
               </div>
             </div>
           </div>

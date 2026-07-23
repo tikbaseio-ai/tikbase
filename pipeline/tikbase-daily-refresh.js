@@ -128,6 +128,7 @@ const NICHE_LABELS = {
   "supplements": "Supplements & Wellness",
   "mens-grooming": "Men's Grooming",
   "haircare": "Haircare",
+  "makeup": "Makeup & Cosmetics",
 };
 
 const KEYWORD_QUERIES = {
@@ -365,6 +366,18 @@ const KEYWORD_QUERIES = {
     "hair oil",
     "dry shampoo",
   ],
+  "makeup": [
+    "lip liner",
+    "blush",
+    "mascara",
+    "foundation",
+    "lip stain",
+    "contour",
+    "brow gel",
+    "setting spray",
+    "lip oil",
+    "eyeshadow palette",
+  ],
 };
 
 const SHOP_SEARCH_TERMS = {
@@ -511,6 +524,14 @@ const SHOP_SEARCH_TERMS = {
     "scalp treatment",
     "hair mask",
     "rosemary oil hair",
+  ],
+  "makeup": [
+    "lip liner",
+    "blush",
+    "mascara",
+    "foundation",
+    "eyeshadow palette",
+    "setting spray",
   ],
 };
 

@@ -113,6 +113,7 @@ export const NICHES = [
   { slug: 'supplements', label: 'Supplements & Wellness' },
   { slug: 'mens-grooming', label: "Men's Grooming" },
   { slug: 'haircare', label: 'Haircare' },
+  { slug: 'makeup', label: 'Makeup & Cosmetics' },
 ];
 
 // Niches without the 'all' option (for Videos page which doesn't support all)

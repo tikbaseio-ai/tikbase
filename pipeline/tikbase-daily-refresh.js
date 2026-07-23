@@ -125,6 +125,9 @@ const NICHE_LABELS = {
   "baby-kids": "Baby & Kids",
   "toys-games": "Toys & Games",
   "fragrance": "Fragrance & Perfume",
+  "supplements": "Supplements & Wellness",
+  "mens-grooming": "Men's Grooming",
+  "haircare": "Haircare",
 };
 
 const KEYWORD_QUERIES = {
@@ -326,6 +329,42 @@ const KEYWORD_QUERIES = {
     "viral cologne tiktok affiliate",
     "tiktok shop perfume women trending",
   ],
+  "supplements": [
+    "sea moss gel",
+    "magnesium glycinate",
+    "collagen powder",
+    "greens powder",
+    "shilajit",
+    "liquid multivitamin",
+    "gut health supplement",
+    "ashwagandha",
+    "creatine gummies",
+    "debloat powder",
+  ],
+  "mens-grooming": [
+    "based bodyworks",
+    "texture powder",
+    "sea salt spray men",
+    "pomade",
+    "mens skincare",
+    "looksmaxxing products",
+    "magnesium deodorant",
+    "mens hair powder",
+    "beard care",
+    "mens glow up",
+  ],
+  "haircare": [
+    "hair growth serum",
+    "heatless curls",
+    "bond repair",
+    "scalp treatment",
+    "hair mask",
+    "wig install",
+    "hair extensions",
+    "rosemary oil hair",
+    "hair oil",
+    "dry shampoo",
+  ],
 };
 
 const SHOP_SEARCH_TERMS = {
@@ -448,6 +487,30 @@ const SHOP_SEARCH_TERMS = {
     "body mist",
     "perfume dupe",
     "eau de parfum",
+  ],
+  "supplements": [
+    "sea moss",
+    "magnesium glycinate",
+    "collagen powder",
+    "greens powder",
+    "shilajit",
+    "ashwagandha",
+  ],
+  "mens-grooming": [
+    "mens grooming",
+    "texture powder",
+    "sea salt spray",
+    "pomade",
+    "beard care",
+    "magnesium deodorant",
+  ],
+  "haircare": [
+    "hair growth serum",
+    "heatless curls",
+    "bond repair",
+    "scalp treatment",
+    "hair mask",
+    "rosemary oil hair",
   ],
 };
 

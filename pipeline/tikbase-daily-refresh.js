@@ -348,11 +348,11 @@ const KEYWORD_QUERIES = {
     "sea salt spray men",
     "pomade",
     "mens skincare",
-    "looksmaxxing products",
+    "mens face wash",
     "magnesium deodorant",
     "mens hair powder",
     "beard care",
-    "mens glow up",
+    "hair clay",
   ],
   "haircare": [
     "hair growth serum",

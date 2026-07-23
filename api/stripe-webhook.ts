@@ -45,6 +45,37 @@ function getSupabase() {
   });
 }
 
+// Find a Supabase user id by email. Paged, but subscription events are
+// infrequent. Used as a fallback when a purchase carries no supabase_user_id
+// (e.g. Stripe Payment Links, which don't set client_reference_id).
+async function findUserIdByEmail(email: string | null | undefined): Promise<string | null> {
+  if (!email) return null;
+  const supabase = getSupabase();
+  const target = email.toLowerCase();
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) return null;
+    const u = data.users.find((x) => (x.email || '').toLowerCase() === target);
+    if (u) return u.id;
+    if (data.users.length < 1000) break;
+  }
+  return null;
+}
+
+// Resolve the Supabase user id for a subscription event: prefer the stamped
+// metadata, fall back to matching the Stripe customer's email.
+async function resolveUserIdForSub(stripe: Stripe, sub: Stripe.Subscription): Promise<string | null> {
+  if (sub.metadata?.supabase_user_id) return sub.metadata.supabase_user_id;
+  const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+  if (!customerId) return null;
+  try {
+    const c = await stripe.customers.retrieve(customerId);
+    return await findUserIdByEmail((c as any)?.email);
+  } catch {
+    return null;
+  }
+}
+
 async function writeSnapshot(userId: string, sub: Stripe.Subscription) {
   const supabase = getSupabase();
   const { data, error } = await supabase.auth.admin.getUserById(userId);
@@ -109,16 +140,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId =
+        let userId =
           session.client_reference_id ||
           (session.metadata && session.metadata.supabase_user_id) ||
           null;
+        // Payment Links carry no client_reference_id, but Stripe captures the
+        // buyer's email — match it to a Supabase account so access is granted.
+        if (!userId) {
+          const email =
+            session.customer_details?.email || (session as any).customer_email || null;
+          userId = await findUserIdByEmail(email);
+          if (userId) {
+            console.log(`checkout.session.completed ${session.id}: linked to ${userId} via email ${email}`);
+          }
+        }
         const subscriptionId =
           typeof session.subscription === 'string'
             ? session.subscription
             : session.subscription?.id;
         if (!userId) {
-          console.error('checkout.session.completed missing client_reference_id', session.id);
+          console.error(
+            `checkout.session.completed ${session.id}: no client_reference_id and buyer email matched no Supabase account — access NOT granted`,
+          );
           break;
         }
         if (!subscriptionId) break;
@@ -129,9 +172,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
-        const userId = sub.metadata?.supabase_user_id;
+        const userId = await resolveUserIdForSub(stripe, sub);
         if (!userId) {
-          console.warn(`${event.type} for ${sub.id} has no supabase_user_id metadata — ignoring`);
+          console.warn(`${event.type} for ${sub.id}: no supabase_user_id and customer email matched no account — ignoring`);
           break;
         }
         await writeSnapshot(userId, sub);

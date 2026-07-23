@@ -1,11 +1,7 @@
 import { useState } from 'react';
-import { Check, X, Tag } from 'lucide-react';
+import { Check, X, Tag, Loader2 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
-
-const STRIPE_LINKS = {
-  monthly: 'https://buy.stripe.com/6oUeVc7iQ2qrc5f3WHfIs00',
-  annual: 'https://buy.stripe.com/cNi3cufPm9ST5GR9h1fIs02',
-};
+import { useAuth } from '@/lib/auth';
 
 const FEATURES = [
   { name: 'Niche browsing', free: true, pro: true },
@@ -29,14 +25,42 @@ export default function PlansPage() {
   const savingsPercent = 30;
 
   const { markStripeOpened } = useSubscription();
+  const { user, session } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleUpgrade() {
-    let link = annual ? STRIPE_LINKS.annual : STRIPE_LINKS.monthly;
-    if (promoCode.trim()) {
-      link += `?prefilled_promo_code=${encodeURIComponent(promoCode.trim())}`;
+  // Go through /api/create-checkout-session (not a raw Payment Link) so the
+  // checkout carries client_reference_id = the Supabase user id. That's what
+  // lets the webhook grant access after payment — Payment Links don't set it,
+  // which left paying users stuck on the free tier.
+  async function handleUpgrade() {
+    if (!user?.id || !session?.access_token) {
+      setError('Please sign in again to upgrade.');
+      return;
     }
-    markStripeOpened();
-    window.open(link, '_blank', 'noopener,noreferrer');
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          plan: annual ? 'annual' : 'monthly',
+          email: user.email,
+          ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || 'Failed to start checkout');
+      markStripeOpened();
+      window.location.href = data.url;
+    } catch (e: any) {
+      setError(e.message || 'Something went wrong');
+      setLoading(false);
+    }
   }
 
   return (
@@ -160,12 +184,18 @@ export default function PlansPage() {
 
           <button
             onClick={handleUpgrade}
-            className="w-full h-10 rounded-md text-sm font-bold transition-colors mb-6"
+            disabled={loading}
+            className="w-full h-10 rounded-md text-sm font-bold transition-colors mb-2 flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
             style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
             data-testid="btn-upgrade"
           >
-            Upgrade to Pro
+            {loading && <Loader2 size={15} className="animate-spin" />}
+            {loading ? 'Starting checkout…' : 'Upgrade to Pro'}
           </button>
+          {error && (
+            <p className="text-xs text-red-400 mb-4 text-center" data-testid="upgrade-error">{error}</p>
+          )}
+          <div className="mb-6" />
           <ul className="space-y-3">
             {FEATURES.map(f => (
               <li key={f.name} className="flex items-center gap-2.5">

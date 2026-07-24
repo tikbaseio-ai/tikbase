@@ -62,6 +62,45 @@ async function findUserIdByEmail(email: string | null | undefined): Promise<stri
   return null;
 }
 
+// Layer C: record a paid checkout that couldn't be linked to any account.
+// Best-effort — if the billing_orphans table doesn't exist yet (migration not
+// run), we still emit the loud log line below, so nothing is silently lost.
+async function recordOrphan(
+  session: Stripe.Checkout.Session,
+  email: string | null,
+  reason: string,
+): Promise<void> {
+  try {
+    const supabase = getSupabase();
+    const subId =
+      typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id ?? null;
+    const custId =
+      typeof session.customer === 'string'
+        ? session.customer
+        : session.customer?.id ?? null;
+    const { error } = await supabase.from('billing_orphans').upsert(
+      {
+        stripe_session_id: session.id,
+        stripe_subscription_id: subId,
+        stripe_customer_id: custId,
+        email,
+        status: 'unresolved',
+        reason,
+      },
+      { onConflict: 'stripe_session_id' },
+    );
+    if (error) {
+      console.error(
+        `[orphan] could not persist ${session.id}: ${error.message} — run pipeline/billing_orphans.sql`,
+      );
+    }
+  } catch (e: any) {
+    console.error(`[orphan] recordOrphan threw for ${session.id}: ${e?.message}`);
+  }
+}
+
 // Resolve the Supabase user id for a subscription event: prefer the stamped
 // metadata, fall back to matching the Stripe customer's email.
 async function resolveUserIdForSub(stripe: Stripe, sub: Stripe.Subscription): Promise<string | null> {
@@ -159,8 +198,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? session.subscription
             : session.subscription?.id;
         if (!userId) {
+          const email2 =
+            session.customer_details?.email || (session as any).customer_email || null;
+          // Layer C: loud + durable. A paying customer we can't link should be
+          // impossible to miss — not one console.error buried in the stream.
           console.error(
-            `checkout.session.completed ${session.id}: no client_reference_id and buyer email matched no Supabase account — access NOT granted`,
+            `🚨 BILLING ORPHAN: paid checkout ${session.id} (${email2 ?? 'no email'}) matched no Supabase account — access NOT granted, recorded in billing_orphans`,
+          );
+          await recordOrphan(
+            session,
+            email2,
+            'paid checkout with no client_reference_id and buyer email matched no account',
           );
           break;
         }

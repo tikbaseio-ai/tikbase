@@ -137,6 +137,122 @@ async function getStoredSubscription(
   return (meta.subscription as StoredSubscription | undefined) ?? null;
 }
 
+// Find a Supabase user id by email (fallback when a purchase carries no
+// supabase_user_id — e.g. a raw Payment Link).
+async function findUserIdByEmail(
+  email: string | null | undefined,
+): Promise<string | null> {
+  if (!email) return null;
+  const supabase = getSupabaseAdmin();
+  const target = email.toLowerCase();
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+    if (error) return null;
+    const u = data.users.find((x) => (x.email || "").toLowerCase() === target);
+    if (u) return u.id;
+    if (data.users.length < 1000) break;
+  }
+  return null;
+}
+
+// Layer C: record a paid checkout we couldn't link (best-effort; loud log even
+// if the billing_orphans table isn't there yet).
+async function recordOrphan(
+  session: Stripe.Checkout.Session,
+  email: string | null,
+  reason: string,
+): Promise<void> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const subId =
+      typeof session.subscription === "string"
+        ? session.subscription
+        : session.subscription?.id ?? null;
+    const custId =
+      typeof session.customer === "string"
+        ? session.customer
+        : session.customer?.id ?? null;
+    const { error } = await supabase.from("billing_orphans").upsert(
+      {
+        stripe_session_id: session.id,
+        stripe_subscription_id: subId,
+        stripe_customer_id: custId,
+        email,
+        status: "unresolved",
+        reason,
+      },
+      { onConflict: "stripe_session_id" },
+    );
+    if (error) {
+      console.error(
+        `[orphan] could not persist ${session.id}: ${error.message} — run pipeline/billing_orphans.sql`,
+      );
+    }
+  } catch (e: any) {
+    console.error(`[orphan] recordOrphan threw for ${session.id}: ${e?.message}`);
+  }
+}
+
+// Layer B: reconcile-at-login. Self-heal a paying customer whose purchase was
+// never linked (Payment Link paid before signup / mismatched email). Idempotent
+// and throttled (see caller). Logs when it fires.
+const RECONCILE_THROTTLE_MS = 60 * 60 * 1000;
+async function reconcileFromStripe(
+  stripe: Stripe,
+  user: { id: string; email?: string; app_metadata?: Record<string, any> },
+): Promise<StoredSubscription | null> {
+  const email = user.email;
+  if (!email) return null;
+  const supabase = getSupabaseAdmin();
+
+  const custs = await stripe.customers.list({ email, limit: 10 });
+  let sub: Stripe.Subscription | null = null;
+  for (const c of custs.data) {
+    const subs = await stripe.subscriptions.list({
+      customer: c.id,
+      status: "all",
+      limit: 10,
+    });
+    const active = subs.data.find((s) => ACTIVE_STATUSES.has(s.status));
+    if (active) {
+      sub = active;
+      break;
+    }
+  }
+  if (!sub) return null;
+
+  const snap = snapshot(sub);
+  const prev = user.app_metadata || {};
+  await supabase.auth.admin.updateUserById(user.id, {
+    app_metadata: {
+      ...prev,
+      subscription: snap,
+      reconcile_checked_at: new Date().toISOString(),
+    },
+  });
+  await stripe.subscriptions
+    .update(sub.id, {
+      metadata: { ...(sub.metadata || {}), supabase_user_id: user.id },
+    })
+    .catch(() => {});
+  await supabase
+    .from("billing_orphans")
+    .update({
+      status: "resolved",
+      resolved_user_id: user.id,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("stripe_subscription_id", sub.id)
+    .then(undefined, () => {});
+  console.log(
+    `[reconcile] self-healed access for user ${user.id} via email ${email} → ${sub.id} (${sub.status})`,
+  );
+  return snap;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
@@ -201,15 +317,31 @@ export async function registerRoutes(
       switch (event.type) {
         case "checkout.session.completed": {
           const session = event.data.object as Stripe.Checkout.Session;
-          const userId =
+          const email =
+            session.customer_details?.email ||
+            (session as any).customer_email ||
+            null;
+          let userId =
             session.client_reference_id ||
             session.metadata?.supabase_user_id ||
-            null;
+            (await findUserIdByEmail(email));
           const subscriptionId =
             typeof session.subscription === "string"
               ? session.subscription
               : session.subscription?.id;
-          if (!userId || !subscriptionId) break;
+          if (!userId) {
+            // Layer C: loud + durable.
+            console.error(
+              `🚨 BILLING ORPHAN: paid checkout ${session.id} (${email ?? "no email"}) matched no Supabase account — access NOT granted, recorded in billing_orphans`,
+            );
+            await recordOrphan(
+              session,
+              email,
+              "paid checkout with no client_reference_id and buyer email matched no account",
+            );
+            break;
+          }
+          if (!subscriptionId) break;
           await upsertSubscriptionForUser(stripe, userId, subscriptionId);
           break;
         }
@@ -334,7 +466,39 @@ export async function registerRoutes(
       const userId = await getAuthedUserId(req);
       if (!userId) return res.json({ isPaid: false });
 
-      const sub = await getStoredSubscription(userId);
+      const supabase = getSupabaseAdmin();
+      const { data, error } = await supabase.auth.admin.getUserById(userId);
+      if (error || !data.user) return res.json({ isPaid: false });
+      const meta = (data.user.app_metadata as Record<string, any>) || {};
+      let sub: StoredSubscription | undefined = meta.subscription;
+
+      // Layer B: throttled self-heal from Stripe if not already paid.
+      if (!isPaidStatus(sub?.status) && process.env.STRIPE_SECRET_KEY) {
+        const last = meta.reconcile_checked_at
+          ? Date.parse(meta.reconcile_checked_at)
+          : 0;
+        if (Date.now() - last > RECONCILE_THROTTLE_MS) {
+          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+          const healed = await reconcileFromStripe(stripe, {
+            id: userId,
+            email: data.user.email,
+            app_metadata: meta,
+          });
+          if (healed) {
+            sub = healed;
+          } else {
+            await supabase.auth.admin
+              .updateUserById(userId, {
+                app_metadata: {
+                  ...meta,
+                  reconcile_checked_at: new Date().toISOString(),
+                },
+              })
+              .catch(() => {});
+          }
+        }
+      }
+
       return res.json({ isPaid: isPaidStatus(sub?.status) });
     } catch (err: any) {
       console.error("check-subscription exception:", err.message);

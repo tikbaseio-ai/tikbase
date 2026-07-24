@@ -1,11 +1,93 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import Stripe from 'stripe';
 
 // Vercel's @vercel/node builder doesn't bundle TS files outside api/ into the
 // function bundle, so shared helpers are inlined here (and in the other api/*
 // handlers). Kept small on purpose.
 
 const ACTIVE_STATUSES = new Set(['active', 'trialing', 'past_due']);
+// Re-check Stripe at most once an hour for a user with no active sub, so free
+// users don't trigger a Stripe lookup on every single app load.
+const RECONCILE_THROTTLE_MS = 60 * 60 * 1000;
+
+function snapshot(sub: Stripe.Subscription) {
+  const item = sub.items.data[0];
+  const cpe =
+    (item as any)?.current_period_end ?? (sub as any).current_period_end ?? null;
+  return {
+    status: sub.status,
+    stripe_customer_id:
+      typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
+    stripe_subscription_id: sub.id,
+    price_id: item?.price?.id ?? null,
+    current_period_end: cpe ? new Date(cpe * 1000).toISOString() : null,
+    cancel_at_period_end: sub.cancel_at_period_end ?? false,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// Layer B: reconcile-at-login safety net.
+// The webhook links the vast majority of purchases. But a Payment Link paid
+// before signup (or with an email that doesn't match the account) can leave a
+// paying customer with no linked subscription — they're stuck on the free tier.
+// When such a user loads the app, look Stripe up by their account email and
+// self-heal. Idempotent: only runs when there's no stored active sub, and
+// re-writes the same snapshot if run again. Logs when it fires.
+async function reconcileFromStripe(
+  supabase: SupabaseClient,
+  user: { id: string; email?: string; app_metadata?: Record<string, any> },
+): Promise<ReturnType<typeof snapshot> | null> {
+  const email = user.email;
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!email || !secret) return null;
+  const stripe = new Stripe(secret);
+
+  const custs = await stripe.customers.list({ email, limit: 10 });
+  let sub: Stripe.Subscription | null = null;
+  for (const c of custs.data) {
+    const subs = await stripe.subscriptions.list({
+      customer: c.id,
+      status: 'all',
+      limit: 10,
+    });
+    const active = subs.data.find((s) => ACTIVE_STATUSES.has(s.status));
+    if (active) {
+      sub = active;
+      break;
+    }
+  }
+  if (!sub) return null;
+
+  const snap = snapshot(sub);
+  const prev = user.app_metadata || {};
+  await supabase.auth.admin.updateUserById(user.id, {
+    app_metadata: {
+      ...prev,
+      subscription: snap,
+      reconcile_checked_at: new Date().toISOString(),
+    },
+  });
+  // Backfill Stripe metadata + close any orphan record for this subscription.
+  await stripe.subscriptions
+    .update(sub.id, {
+      metadata: { ...(sub.metadata || {}), supabase_user_id: user.id },
+    })
+    .catch(() => {});
+  await supabase
+    .from('billing_orphans')
+    .update({
+      status: 'resolved',
+      resolved_user_id: user.id,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq('stripe_subscription_id', sub.id)
+    .then(undefined, () => {});
+  console.log(
+    `[reconcile] self-healed access for user ${user.id} via email ${email} → ${sub.id} (${sub.status})`,
+  );
+  return snap;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -29,7 +111,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data, error } = await supabase.auth.admin.getUserById(userId);
     if (error || !data.user) return res.json({ isPaid: false });
 
-    const sub = (data.user.app_metadata as any)?.subscription;
+    const meta = (data.user.app_metadata as Record<string, any>) || {};
+    let sub = meta.subscription;
+
+    // Layer B: if not already paid, attempt a throttled self-heal from Stripe.
+    if (!(sub?.status && ACTIVE_STATUSES.has(sub.status))) {
+      const last = meta.reconcile_checked_at
+        ? Date.parse(meta.reconcile_checked_at)
+        : 0;
+      if (Date.now() - last > RECONCILE_THROTTLE_MS) {
+        const healed = await reconcileFromStripe(supabase, {
+          id: userId,
+          email: data.user.email,
+          app_metadata: meta,
+        });
+        if (healed) {
+          sub = healed;
+        } else {
+          // Stamp the throttle timestamp so we don't hit Stripe every load.
+          await supabase.auth.admin
+            .updateUserById(userId, {
+              app_metadata: { ...meta, reconcile_checked_at: new Date().toISOString() },
+            })
+            .catch(() => {});
+        }
+      }
+    }
+
     const isPaid = !!sub?.status && ACTIVE_STATUSES.has(sub.status);
     return res.json({ isPaid });
   } catch (err: any) {

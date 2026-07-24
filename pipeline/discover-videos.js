@@ -113,6 +113,12 @@ async function main() {
   // so high-revenue products (e.g. a $160 car seat with 1 video) never got
   // discovery and stayed stuck at 1 video.
   const MIN_VIDEOS = Number(process.env.DISCOVER_MIN_VIDEOS) || 3;
+  // Storage floor: drop true junk (bot/throwaway clips) but keep real
+  // small-creator content — on a video-starved product, a 5K-view clip is
+  // signal for affiliates, not pollution. The product page already sorts by
+  // views and shows only the top 5, so low-view rows never surface on a
+  // well-covered product; they only ever fill an otherwise-empty page.
+  const MIN_VIEWS = Number(process.env.DISCOVER_MIN_VIEWS) || 1000;
   const DISCOVER_LIMIT = Number(process.env.DISCOVER_LIMIT) || 400;
 
   // List the ranking keys first (lightweight — no payloads), then read each
@@ -221,7 +227,7 @@ async function main() {
           if (!matchesProduct) continue;
 
           const views = video?.statistics?.play_count || 0;
-          if (views < 100) continue; // skip very low-view videos
+          if (views < MIN_VIEWS) continue; // skip junk; keep real small-creator content
 
           const videoUrl = `https://www.tiktok.com/@${
             video?.author?.unique_id || "user"

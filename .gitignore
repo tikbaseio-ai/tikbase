@@ -5,3 +5,6 @@ dist/
 .DS_Store
 .vercel
 scripts/
+
+# Runtime state written by the pipeline (regenerated each run), not code
+pipeline/price-fail-tracker.json

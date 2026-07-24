@@ -28,15 +28,28 @@ function getVideoPostDate(videoUrl: string): Date | null {
   }
 }
 
-function getDateFromSnowflake(id: string): Date | null {
-  try {
-    const ts = Number(BigInt(id) >> 32n);
-    const date = new Date(ts * 1000);
-    if (date.getFullYear() < 2020 || date.getFullYear() > 2027) return null;
-    return date;
-  } catch {
-    return null;
+// Days since we first saw this product in our data. TikTok Shop product IDs are
+// NOT snowflake-timestamped like video IDs — decoding product_id as a snowflake
+// always fell outside the valid range, so the old code silently defaulted
+// daysActive to 365 for every single product. Use the real first-seen instead:
+// products.created_at, or the earliest snapshot if created_at is missing.
+function firstSeenDaysActive(product: any, snapshots: any[], now: Date): number {
+  const signals: number[] = [];
+  if (product?.created_at) {
+    const t = Date.parse(product.created_at);
+    if (!Number.isNaN(t)) signals.push(t);
   }
+  if (snapshots?.length) {
+    const earliest = [...snapshots].sort((a, b) =>
+      a.snapshot_date.localeCompare(b.snapshot_date),
+    )[0]?.snapshot_date;
+    if (earliest) {
+      const t = Date.parse(earliest);
+      if (!Number.isNaN(t)) signals.push(t);
+    }
+  }
+  if (!signals.length) return 365; // no signal at all — keep the old default
+  return Math.max(1, Math.floor((now.getTime() - Math.min(...signals)) / 86400000));
 }
 
 // A snapshot delta is only trusted if its true span is within this multiple
@@ -101,13 +114,7 @@ function estimateProductMetrics(
 ) {
   const now = new Date();
   const cutoff = new Date(now.getTime() - periodDays * 86400000);
-  const listingDate = getDateFromSnowflake(product.product_id);
-  const daysActive = listingDate
-    ? Math.max(
-        1,
-        Math.floor((now.getTime() - listingDate.getTime()) / 86400000),
-      )
-    : 365;
+  const daysActive = firstSeenDaysActive(product, snapshots, now);
 
   let periodViews = 0;
   let periodVideoCount = 0;
@@ -307,7 +314,7 @@ export async function computeTopProducts(
     while (true) {
       const { data } = await supabase
         .from('products')
-        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url')
+        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
         .gt('sold_count', 0)
         .order('sold_count', { ascending: false })
         .range(offset, offset + 999);
@@ -321,7 +328,7 @@ export async function computeTopProducts(
     while (true) {
       const { data } = await supabase
         .from('products')
-        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url')
+        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
         .eq('niche_slug', nicheSlug)
         .gt('sold_count', 0)
         .range(offset, offset + 999);

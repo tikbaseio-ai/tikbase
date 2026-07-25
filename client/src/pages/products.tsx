@@ -3,6 +3,7 @@ import {
   NICHES,
   TIMEFRAMES,
   formatViews,
+  authHeader,
   type Product,
   type ProductVideo,
 } from '@/lib/supabase';
@@ -33,7 +34,7 @@ async function fetchProducts(
   if (cached && Date.now() - cached.timestamp < PRODUCT_CACHE_TTL) return cached.data;
 
   const params = new URLSearchParams({ niche, days: String(days), page: String(page), limit: String(limit), sort, dir });
-  const res = await fetch(`/api/top-products?${params}`);
+  const res = await fetch(`/api/top-products?${params}`, { headers: await authHeader() });
   if (!res.ok) throw new Error('Failed to fetch products');
   const data = await res.json();
   const result = { products: data.products || [], total: data.total || 0 };
@@ -76,16 +77,16 @@ export default function ProductsPage() {
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
 
-  // Free users default to "1 Year" tab and page 3
+  // Free users get the real top 10 on the 1 Week window (server enforces
+  // all/7d/top-10; align the UI so the active pill matches what's returned).
   useEffect(() => {
     if (!isPaid) {
-      const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
-      if (oneYear) setTimeframe(oneYear);
-      setPage(3);
+      const oneWeek = TIMEFRAMES.find(t => t.label === '1 Week');
+      if (oneWeek) setTimeframe(oneWeek);
     }
   }, [isPaid]);
 
-  useEffect(() => { setPage(!isPaid ? 3 : 1); }, [timeframe, sortKey, sortDir, isPaid]);
+  useEffect(() => { setPage(1); }, [timeframe, sortKey, sortDir]);
 
   // Fetch products from server-side endpoint
   useEffect(() => {
@@ -187,14 +188,14 @@ export default function ProductsPage() {
           className="h-9 px-3 rounded-md text-sm font-medium border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer">
           {NICHES.map(n => (
             <option key={n.slug} value={n.slug} disabled={!isPaid && n.slug !== 'all'}>
-              {n.label}{!isPaid && n.slug !== 'all' ? ' 🔒' : ''}
+              {n.label}{!isPaid && n.slug !== 'all' ? ' (Pro)' : ''}
             </option>
           ))}
         </select>
 
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
           {TIMEFRAMES.map(tf => {
-            const isLocked = !isPaid && tf.label !== '1 Year';
+            const isLocked = !isPaid && tf.label !== '1 Week';
             return (
               <button key={tf.label}
                 onClick={() => {
@@ -280,38 +281,14 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {(() => {
-                  return pageProducts.map((product, idx) => {
+                {pageProducts.map((product, idx) => {
                   const rank = (page - 1) * limit + idx + 1;
-                  const isRowLocked = !isPaid && (rank < 101 || rank > 150);
                   const m = product.metrics;
                   const price = product.sale_price || 0;
                   const bookmarked = isProductBookmarked(product.product_id);
 
                   // Top 5 videos pre-sorted by server
                   const displayVideos = product.topVideos || [];
-
-                  if (isRowLocked) {
-                    return (
-                      <tr key={product.product_id} className="relative cursor-pointer" onClick={() => showPaywall('top_products')}>
-                        <td className="py-3 px-3">
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold"
-                            style={rank <= 3 ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : { backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}>
-                            {rank}
-                          </span>
-                        </td>
-                        <td colSpan={10} className="py-3 px-3">
-                          <div className="relative overflow-hidden rounded h-10 flex items-center">
-                            <div className="absolute inset-0 bg-muted/40 backdrop-blur-sm" />
-                            <div className="relative z-10 flex items-center gap-2 w-full justify-center">
-                              <Lock size={14} className="text-[#a3ff00]" />
-                              <span className="text-[11px] font-medium text-white">Upgrade to unlock</span>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  }
 
                   return (
                     <tr key={product.product_id} className="hover:bg-secondary/30 transition-colors">
@@ -429,13 +406,25 @@ export default function ProductsPage() {
                       </td>
                     </tr>
                   );
-                });
-                })()}
+                })}
               </tbody>
             </table>
           </div>
 
-          {totalPages > 1 && (
+          {/* Free tier sees the real top 10, then one upsell to the full list.
+              Paid tier keeps normal pagination. */}
+          {!isPaid ? (
+            <button
+              onClick={() => showPaywall('top_products')}
+              className="w-full mt-4 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              data-testid="upsell-products"
+            >
+              <Lock size={16} className="text-[#a3ff00]" />
+              <span className="text-sm font-semibold text-foreground">
+                Unlock {Math.max(0, total - pageProducts.length).toLocaleString()}+ more products — see everything selling right now
+              </span>
+            </button>
+          ) : totalPages > 1 ? (
             <div className="flex items-center justify-center gap-2 mt-6 mb-4">
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
                 className="h-9 w-9 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-30 disabled:pointer-events-none transition-colors">
@@ -447,7 +436,7 @@ export default function ProductsPage() {
                 <ChevronRight size={16} />
               </button>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>

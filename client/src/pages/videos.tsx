@@ -29,18 +29,18 @@ export default function VideosPage() {
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
 
-  // Free users default to "1 Year" tab and page 3
+  // Free users get the real top 10 on the 1 Week window (server enforces
+  // all/7d/top-10; align the UI so the active pill matches what's returned).
   useEffect(() => {
     if (!isPaid) {
-      const oneYear = TIMEFRAMES.find(t => t.label === '1 Year');
-      if (oneYear) setTimeframe(oneYear);
-      setPage(3);
+      const oneWeek = TIMEFRAMES.find(t => t.label === '1 Week');
+      if (oneWeek) setTimeframe(oneWeek);
     }
   }, [isPaid]);
 
   useEffect(() => {
-    setPage(!isPaid ? 3 : 1);
-  }, [niche, timeframe, isPaid]);
+    setPage(1);
+  }, [niche, timeframe]);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,7 +114,7 @@ export default function VideosPage() {
         >
           {NICHES.map(n => (
             <option key={n.slug} value={n.slug} disabled={!isPaid && n.slug !== 'all'}>
-              {n.label}{!isPaid && n.slug !== 'all' ? ' 🔒' : ''}
+              {n.label}{!isPaid && n.slug !== 'all' ? ' (Pro)' : ''}
             </option>
           ))}
         </select>
@@ -122,7 +122,7 @@ export default function VideosPage() {
         {/* Timeframe pills */}
         <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
           {TIMEFRAMES.map(tf => {
-            const isLocked = !isPaid && tf.label !== '1 Year';
+            const isLocked = !isPaid && tf.label !== '1 Week';
             return (
               <button
                 key={tf.label}
@@ -182,31 +182,6 @@ export default function VideosPage() {
             {videos.map((video, idx) => {
               const rank = (page - 1) * limit + idx + 1;
               const bookmarked = isVideoBookmarked(video.id);
-              const isLocked = !isPaid && (rank < 101 || rank > 150);
-
-              if (isLocked) {
-                return (
-                  <div key={video.id} className="relative rounded-lg border border-border bg-card overflow-hidden cursor-pointer"
-                    onClick={() => showPaywall('top_videos')}>
-                    <div className="aspect-[9/16] max-h-[280px] overflow-hidden bg-muted">
-                      {(() => {
-                        const vid = video.video_url?.match(/video\/(\d+)/)?.[1];
-                        const src = vid ? `/api/thumb?vid=${vid}` : video.cover_image_url;
-                        return src ? <img src={src} alt="" className="w-full h-full object-cover blur-md opacity-40" loading="lazy" /> : <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />;
-                      })()}
-                    </div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-center">
-                        <Lock size={20} className="text-[#a3ff00] mx-auto mb-1" />
-                        <span className="text-[11px] font-medium text-white">Upgrade to unlock</span>
-                      </div>
-                    </div>
-                    <div className="absolute top-2 left-2 z-20">
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white">#{rank}</span>
-                    </div>
-                  </div>
-                );
-              }
 
               return (
                 <div
@@ -374,8 +349,20 @@ export default function VideosPage() {
             })}
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
+          {/* Free tier sees the real top 10, then one upsell to the full list.
+              Paid tier keeps normal pagination. */}
+          {!isPaid ? (
+            <button
+              onClick={() => showPaywall('top_videos')}
+              className="w-full mt-8 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              data-testid="upsell-videos"
+            >
+              <Lock size={16} className="text-[#a3ff00]" />
+              <span className="text-sm font-semibold text-foreground">
+                Unlock {Math.max(0, total - videos.length).toLocaleString()}+ more videos — see everything trending right now
+              </span>
+            </button>
+          ) : totalPages > 1 ? (
             <div className="flex items-center justify-center gap-2 mt-8 mb-4">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -397,7 +384,7 @@ export default function VideosPage() {
                 <ChevronRight size={16} />
               </button>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>

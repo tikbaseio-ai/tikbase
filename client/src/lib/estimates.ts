@@ -170,6 +170,7 @@ export function calculateProductMetrics(
     review_count: number;
     sale_price: number;
     niche_slug?: string;
+    created_at?: string;
   },
   videos: VideoForEstimate[],
   periodDays: number,
@@ -179,11 +180,27 @@ export function calculateProductMetrics(
   const now = new Date();
   const cutoff = new Date(now.getTime() - periodDays * 86400000);
 
-  // Get product listing date
-  const listingDate = getDateFromSnowflake(product.product_id);
-  const daysActive = listingDate
-    ? Math.max(1, Math.floor((now.getTime() - listingDate.getTime()) / 86400000))
-    : 365;
+  // Days since we first saw this product in our data. Product IDs are NOT
+  // snowflake-timestamped like video IDs (getDateFromSnowflake(product_id)
+  // always returns null → the old code defaulted daysActive to 365 for every
+  // product). Use the real first-seen: products.created_at, else earliest snapshot.
+  const daysActive = (() => {
+    const signals: number[] = [];
+    if (product.created_at) {
+      const t = Date.parse(product.created_at);
+      if (!Number.isNaN(t)) signals.push(t);
+    }
+    if (snapshots?.length) {
+      const earliest = [...snapshots].sort((a, b) =>
+        a.snapshot_date.localeCompare(b.snapshot_date))[0]?.snapshot_date;
+      if (earliest) {
+        const t = Date.parse(earliest);
+        if (!Number.isNaN(t)) signals.push(t);
+      }
+    }
+    if (!signals.length) return 365;
+    return Math.max(1, Math.floor((now.getTime() - Math.min(...signals)) / 86400000));
+  })();
 
   // Sum views by period
   let periodViews = 0;
@@ -230,17 +247,21 @@ export function calculateProductMetrics(
   let estPeriodUnitsSold: number;
   let hasRealDelta = false;
 
-  if (periodViews === 0) {
-    // No video activity this period → no evidence of sales. Hard zero.
+  // === TIER 1: Real snapshot delta (checked FIRST) ===
+  // A product can be a top seller in the window without a fresh viral video, so
+  // the real day-over-day delta is checked regardless of recent video activity.
+  // (Previously periodViews === 0 short-circuited to 0 units and hid genuine
+  // best-sellers that sold steadily without new videos this period.)
+  const exactDelta = snapshots ? calculateSnapshotDelta(snapshots, periodDays) : null;
+
+  if (exactDelta != null && exactDelta >= 0) {
+    estPeriodUnitsSold = exactDelta;
+    hasRealDelta = true;
+  } else if (periodViews === 0) {
+    // No measured sales delta and no recent attention → nothing to estimate.
     estPeriodUnitsSold = 0;
   } else {
-    // === TIER 1: Real snapshot delta ===
-    const exactDelta = snapshots ? calculateSnapshotDelta(snapshots, periodDays) : null;
-
-    if (exactDelta != null && exactDelta >= 0) {
-      estPeriodUnitsSold = exactDelta;
-      hasRealDelta = true;
-    } else {
+    {
       // === TIER 2: Scale from shorter real delta ===
       let scaledFromShorter: number | null = null;
       if (snapshots && snapshots.length >= 2) {

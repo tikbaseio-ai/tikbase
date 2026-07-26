@@ -392,17 +392,56 @@ export async function computeTopProducts(
   return enriched;
 }
 
+// Server-side entitlement gate. The full Pro dataset used to be publicly
+// curlable — all gating was client-side. Resolve the caller's tier from their
+// Bearer token here (lightweight verification copied from check-subscription.ts;
+// NO Stripe calls on the data path). Any missing/invalid token or lookup failure
+// degrades to 'free' — we never 401 a data request.
+const ACTIVE_STATUSES = new Set(['active', 'trialing', 'past_due']);
+async function resolveTier(req: VercelRequest): Promise<'free' | 'paid'> {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return 'free';
+    const supabase = getAdminClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !authData.user) return 'free';
+    const { data, error } = await supabase.auth.admin.getUserById(authData.user.id);
+    if (error || !data.user) return 'free';
+    const sub = (data.user.app_metadata as any)?.subscription;
+    return sub?.status && ACTIVE_STATUSES.has(sub.status) ? 'paid' : 'free';
+  } catch {
+    return 'free';
+  }
+}
+
+// Free tier: real top 10 on fresh 7-day data, 'all' niche only.
+const FREE_NICHE = 'all';
+const FREE_DAYS = 7;
+const FREE_ROWS = 10;
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse,
 ) {
   try {
-    const nicheSlug = (req.query.niche as string) || 'all';
-    const days = parseInt((req.query.days as string) || '7', 10);
-    const page = Math.max(1, parseInt((req.query.page as string) || '1', 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '50', 10) || 50));
+    const tier = await resolveTier(req);
+
+    let nicheSlug = (req.query.niche as string) || 'all';
+    let days = parseInt((req.query.days as string) || '7', 10);
+    let page = Math.max(1, parseInt((req.query.page as string) || '1', 10) || 1);
+    let limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '50', 10) || 50));
     const sortBy = (req.query.sort as string) || 'estRevenue';
     const sortDir = (req.query.dir as string) || 'desc';
+
+    // Free-tier coercion BEFORE cache/compute lookup: pin to all/7d/top-10 no
+    // matter what the client asks for (blocks ?niche=&days=&page=&limit= bypass).
+    if (tier === 'free') {
+      nicheSlug = FREE_NICHE;
+      days = FREE_DAYS;
+      page = 1;
+      limit = FREE_ROWS;
+    }
 
     if (![7, 14, 30, 90, 180, 365].includes(days)) {
       return res.status(400).json({ error: 'Invalid days' });
@@ -440,14 +479,14 @@ export default async function handler(
     }
 
     const offset = (page - 1) * limit;
-    res.setHeader(
-      'Cache-Control',
-      's-maxage=3600, stale-while-revalidate=86400, max-age=300',
-    );
+    // Per-user (tiered) responses must never be shared by the CDN, which caches
+    // by URL and ignores auth — an edge-cached Pro payload would leak to free
+    // callers. 'private' keeps it browser-only; rankings_cache keeps it fast.
+    res.setHeader('Cache-Control', 'private, max-age=300');
 
     return res.json({
       products: sorted.slice(offset, offset + limit),
-      total: sorted.length,
+      total: sorted.length, // honest full count even when the page is truncated
       page,
       limit,
     });

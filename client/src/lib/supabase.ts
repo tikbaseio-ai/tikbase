@@ -1,6 +1,21 @@
 // Direct Supabase REST API client without the SDK
 // (SDK uses localStorage/sessionStorage which are blocked in sandboxed iframes)
 
+import { supabaseAuth } from './supabaseAuth';
+
+// Bearer header for our own /api/* endpoints so the server can resolve the
+// caller's tier (top-products / top-videos gate on this). Anonymous callers
+// send no token and are served the free tier. Never throws.
+export async function authHeader(): Promise<Record<string, string>> {
+  try {
+    const { data } = await supabaseAuth.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 const SUPABASE_URL = 'https://ntapskfgodvynlfyulnv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50YXBza2Znb2R2eW5sZnl1bG52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MzEyNzUsImV4cCI6MjA4OTIwNzI3NX0.jOA-9kwBrOsfc8uqFFcyp0PajoKl9HQcRmaliYELBQo';
 
@@ -202,7 +217,7 @@ export async function fetchTopVideos(
     limit: String(limit),
   });
 
-  const res = await fetch(`/api/top-videos?${params}`);
+  const res = await fetch(`/api/top-videos?${params}`, { headers: await authHeader() });
   if (!res.ok) {
     throw new Error(`Failed to fetch videos: ${res.status}`);
   }

@@ -6,6 +6,7 @@ import {
   formatViews,
   timeAgo,
   extractPostDate,
+  authHeader,
   type VideoWithProduct,
   type Product,
 } from '@/lib/supabase';
@@ -30,7 +31,7 @@ async function fetchTop5Products(niche: string, days: number): Promise<EnrichedP
   const params = new URLSearchParams({
     niche, days: String(days), page: '1', limit: '5', sort: 'estRevenue', dir: 'desc',
   });
-  const res = await fetch(`/api/top-products?${params}`);
+  const res = await fetch(`/api/top-products?${params}`, { headers: await authHeader() });
   if (!res.ok) throw new Error('Failed to fetch products');
   const data = await res.json();
   return data.products || [];
@@ -47,10 +48,11 @@ function EmptyRow({ icon, text }: { icon: ReactNode; text: string }) {
 
 export default function OverviewPage() {
   const { isPaid, showPaywall } = useSubscription();
-  // Match the other pages' defaults: paid -> 2 Weeks, free -> 1 Year.
+  // Match the other pages' defaults: paid -> 2 Weeks, free -> 1 Week
+  // (free is server-pinned to all/7d; the overview mirrors that window).
   const timeframe = isPaid
     ? TIMEFRAMES[1]
-    : (TIMEFRAMES.find(t => t.label === '1 Year') || TIMEFRAMES[1]);
+    : (TIMEFRAMES.find(t => t.label === '1 Week') || TIMEFRAMES[0]);
 
   const [products, setProducts] = useState<EnrichedProduct[]>([]);
   const [videos, setVideos] = useState<VideoWithProduct[]>([]);

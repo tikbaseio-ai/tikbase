@@ -4,8 +4,7 @@ import { useSubscription } from '@/hooks/use-subscription';
 import { useAuth } from '@/lib/auth';
 
 const FEATURES = [
-  { name: 'Niche browsing', free: true, pro: true },
-  { name: 'Top 10 videos per niche', free: true, pro: true },
+  { name: 'Top 10 products & videos, live 7-day data (with revenue estimates)', free: true, pro: true },
   { name: 'Top 50+ videos per niche', free: false, pro: true },
   { name: 'Product analytics', free: false, pro: true },
   { name: 'Revenue estimates', free: false, pro: true },

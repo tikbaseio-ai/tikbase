@@ -28,12 +28,21 @@ jobs:
         run: npm ci
 
       # Phase 3 snapshot budget, stated explicitly so the daily ScrapeCreators
-      # spend is visible here rather than buried in a default. HOT re-snapshots
-      # the top sellers every run; ROTATION drains the least-recently-snapshotted
-      # tail so every product is covered on a ~7.5-day cycle (needed for the
-      # 7-day window's delta, see MAX_SPAN_RATIO in api/top-products.ts).
-      # Total = 6,000 calls/day. Lower both to cut spend; the cycle lengthens
-      # proportionally and windows shorter than the cycle stop earning real deltas.
+      # spend is visible here rather than buried in a default.
+      #
+      # The hot tier is NOT bounded by SNAPSHOT_HOT_LIMIT alone: it is every
+      # product currently served from rankings_cache (~10.7k) UNION the top
+      # SNAPSHOT_HOT_LIMIT by sold_count, so ~11.0k. Plus ROTATION, which drains
+      # the least-recently-snapshotted tail so every product is covered on a
+      # ~5.5-day cycle (needed for the 7-day window's delta — see MAX_SPAN_RATIO
+      # in api/top-products.ts).
+      #
+      # TOTAL ~15,500 calls/day, up from 3,000 before this change. Credits ran
+      # out entirely on 2026-07-19/20; watch the balance after this ships.
+      # To cut spend: lower SNAPSHOT_ROTATION_LIMIT first (keeps the membership
+      # guarantee), then STORE_TOP_N_PRODUCTS in precompute-rankings.ts (shrinks
+      # the cache, and so the guarantee, at source). SNAPSHOT_CACHE_MEMBERSHIP=0
+      # disables the guarantee outright — emergency lever only.
       - name: Run daily refresh pipeline
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}

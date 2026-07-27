@@ -38,7 +38,32 @@ create index if not exists idx_products_snapshot_rotation
   on products (last_snapshot_date nulls first, product_id)
   where sold_count > 0 and price_unavailable is not true;
 
--- 4. Verify. Expect: total 43,903-ish; never_snapshotted ~16,557 before the
+-- 4. Membership guarantee source. Every product currently served from
+--    rankings_cache must be in Phase 3's hot tier — these are the rows users
+--    actually page through, so a stale one is visibly stale in the UI and can
+--    never refresh its delta. Extracting the ids in SQL keeps the pipeline from
+--    pulling ~180 MB of payload JSON on every run just to read the ids back out.
+--
+--    Covers both products:* and videos:* payloads (both carry a top-level
+--    product_id). Joins to products and drops price_unavailable rows: those
+--    404ed upstream, so re-fetching them burns a credit per run forever.
+--    Measured 2026-07-27: 10,738 distinct members, 45 of them already dead.
+create or replace view rankings_cache_members as
+select distinct p.product_id
+from rankings_cache rc
+cross join lateral jsonb_array_elements(rc.payload) as elem
+join products p
+  on p.product_id = elem->>'product_id'
+where p.price_unavailable is not true;
+
+--    Lock the view down. rankings_cache holds the full 400-deep ranking per
+--    niche/timeframe, and the free tier deliberately serves only the first 10
+--    rows — an anon-readable view of every ranked product_id would hand that
+--    cap away. Only the pipeline (service_role) needs it.
+revoke all on rankings_cache_members from anon, authenticated;
+grant select on rankings_cache_members to service_role;
+
+-- 5. Verify. Expect: total 43,903-ish; never_snapshotted ~16,557 before the
 --    first rotation run, falling every day afterwards; oldest_cursor no more
 --    than ~10 days behind once the cycle is established.
 select
@@ -49,3 +74,7 @@ select
 from products
 where sold_count > 0
   and price_unavailable is not true;
+
+--    And the membership set. Expect ~10,738 rows. This is the floor on the hot
+--    tier size, and therefore on the daily ScrapeCreators spend.
+select count(*) as cache_members from rankings_cache_members;

@@ -48,11 +48,38 @@ const RATE_LIMIT_MS = 250; // 250ms between API calls
 // change the 404/availability rate.)
 const REGION = process.env.SCRAPECREATORS_REGION || "US";
 
-// Phase 3 snapshot freshness: each day we re-fetch fresh sold_count/price/stock
-// for the highest-velocity products (sold_count>0, not price_unavailable),
-// ordered by sold_count desc, capped at SNAPSHOT_TRACKED_LIMIT. Bounded
-// concurrency matches the backfill script.
-const SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 3000;
+// Phase 3 snapshot allocation. Each day we re-fetch fresh sold_count/price/stock
+// for a bounded set of products (every fetch costs one ScrapeCreators call).
+// The set is drawn in two tiers from the same eligible pool — sold_count>0 and
+// not price_unavailable:
+//
+//   HOT      — highest lifetime sold_count, re-snapshotted EVERY run, so the head
+//              of every ranking always carries a fresh day-over-day delta.
+//   ROTATION — least-recently-snapshotted, NULLs (never snapshotted) first, so
+//              the long tail is covered on a bounded cycle instead of never.
+//
+// Why a rotation rather than a bigger top-N: ordering the whole budget by
+// sold_count is a fixed point. The same products win every run, so anything
+// below the cutoff is excluded permanently, not just today — it can never
+// accumulate the second snapshot that hasRealDelta requires. See
+// probes/SNAPSHOT-COVERAGE.md: that cutoff left 96.9% of products created after
+// 2026-07-08 with zero snapshots.
+//
+// Sizing: api/top-products.ts rejects a delta whose baseline->latest span falls
+// outside periodDays/1.5 .. periodDays*1.5 (MAX_SPAN_RATIO). The shortest window
+// is 7 days, so a product must be re-snapshotted at least every ~10 days to be
+// eligible for a real delta there. Against ~35.3k eligible products, a 4,500/run
+// rotation clears the tail in ~7.5 days — inside that ceiling with margin.
+//
+// Cost/time: measured throughput is ~3.49 products/sec for the whole of Phase 3
+// (fetch + related_videos mining) at concurrency 10. 6,000/run is ~29 min of
+// Phase 3 and 6,000 API credits/day. Both limits are env-tunable; lower them
+// together to cut credit spend, at the cost of a longer rotation cycle.
+const SNAPSHOT_HOT_LIMIT = Number(process.env.SNAPSHOT_HOT_LIMIT) || 1500;
+const SNAPSHOT_ROTATION_LIMIT = Number(process.env.SNAPSHOT_ROTATION_LIMIT) || 4500;
+// Legacy single-cap override. Still honoured when set: it caps the COMBINED
+// tracked set, split between the two tiers in their configured ratio.
+const SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 0;
 const SNAPSHOT_CONCURRENCY = 10;
 
 // ---------------------------------------------------------------------------
@@ -83,6 +110,7 @@ const stats = {
   phase1_products: 0,
   phase2_products: 0,
   phase3_snapshots: 0,
+  phase3_rotation_advanced: 0,
   phase3_related_inserted: 0,
   phase3_related_updated: 0,
   phase4_prices_filled: 0,
@@ -977,34 +1005,121 @@ async function upsertRelatedVideos(relatedByProduct) {
   return s;
 }
 
-async function phase3(limitOverride) {
-  console.log("\n========== PHASE 3: Snapshot All Products ==========\n");
-
-  const snapshotDate = today();
-  const limit = limitOverride ?? SNAPSHOT_TRACKED_LIMIT;
-
-  // Tracked set: highest-velocity, still-fetchable products. We re-fetch FRESH
-  // values for these (not the stale stored row) so snapshots actually move
-  // day-over-day and the delta model can compute real units sold.
-  const tracked = [];
-  for (let from = 0; tracked.length < limit; from += 1000) {
+// Page the eligible pool under one ordering. Eligibility is identical for both
+// tiers — a positive lifetime sold_count, and not already marked unfetchable.
+// The product_id tiebreak matters: thousands of rows share a last_snapshot_date,
+// and without a stable secondary sort the paginated reads can return an
+// arbitrary slice of that tie each run, starving the rest of the group.
+// Returns { ids, error } — the caller decides whether a failure is fatal.
+async function fetchEligible({ column, ascending, nullsFirst, limit, label }) {
+  const ids = [];
+  for (let from = 0; ids.length < limit; from += 1000) {
     const { data, error } = await supabase
       .from("products")
       .select("product_id")
       .gt("sold_count", 0)
       .or("price_unavailable.is.null,price_unavailable.eq.false")
-      .order("sold_count", { ascending: false })
+      .order(column, { ascending, nullsFirst })
+      .order("product_id", { ascending: true })
       .range(from, from + 999);
     if (error) {
-      console.error("  [ERROR] Fetching tracked set:", error.message);
-      break;
+      console.error(`  [ERROR] Fetching ${label} set:`, error.message);
+      return { ids, error };
     }
     if (!data || data.length === 0) break;
-    tracked.push(...data.map((r) => r.product_id));
+    ids.push(...data.map((r) => r.product_id));
     if (data.length < 1000) break;
   }
-  const trackedSet = tracked.slice(0, limit);
-  console.log(`  Tracked set: ${trackedSet.length} products (sold>0, fetchable, top by sold_count) | concurrency ${SNAPSHOT_CONCURRENCY}`);
+  return { ids: ids.slice(0, limit), error: null };
+}
+
+async function phase3(limitOverride) {
+  console.log("\n========== PHASE 3: Snapshot All Products ==========\n");
+
+  const snapshotDate = today();
+
+  // Budget split. limitOverride (--phase3-only N) and the legacy
+  // SNAPSHOT_TRACKED_LIMIT both cap the COMBINED set; the tiers keep their
+  // configured ratio so a scoped test run still exercises both paths.
+  const configuredTotal =
+    SNAPSHOT_TRACKED_LIMIT || SNAPSHOT_HOT_LIMIT + SNAPSHOT_ROTATION_LIMIT;
+  const total = limitOverride ?? configuredTotal;
+  const hotShare = SNAPSHOT_HOT_LIMIT / (SNAPSHOT_HOT_LIMIT + SNAPSHOT_ROTATION_LIMIT);
+  const hotLimit =
+    total === configuredTotal && !SNAPSHOT_TRACKED_LIMIT
+      ? SNAPSHOT_HOT_LIMIT
+      : Math.max(1, Math.round(total * hotShare));
+  const rotationLimit = Math.max(0, total - hotLimit);
+
+  // Tier 1 — hot: highest lifetime sold_count. We re-fetch FRESH values for
+  // these (not the stale stored row) so snapshots actually move day-over-day
+  // and the delta model can compute real units sold.
+  const hot = await fetchEligible({
+    column: "sold_count",
+    ascending: false,
+    nullsFirst: false,
+    limit: hotLimit,
+    label: "hot",
+  });
+
+  // Tier 2 — rotation: least-recently-snapshotted first, NULLs (never
+  // snapshotted) ahead of everything else, so the backlog drains before the
+  // already-covered products are revisited.
+  let rotation = { ids: [], error: null };
+  if (rotationLimit > 0) {
+    rotation = await fetchEligible({
+      column: "last_snapshot_date",
+      ascending: true,
+      nullsFirst: true,
+      limit: rotationLimit,
+      label: "rotation",
+    });
+  }
+
+  // The rotation tier depends on products.last_snapshot_date, added by
+  // pipeline/last-snapshot-date.sql. If that migration has not been applied,
+  // degrade to the previous top-by-sold_count behaviour rather than collapsing
+  // to a partial run — but say so loudly, because coverage silently reverts.
+  let degraded = false;
+  if (rotation.error) {
+    degraded = true;
+    console.error(
+      `\n  ${"!".repeat(60)}\n` +
+      `  ROTATION TIER UNAVAILABLE — products.last_snapshot_date is not queryable.\n` +
+      `  Run pipeline/last-snapshot-date.sql in the Supabase SQL editor.\n` +
+      `  Falling back to top-${total}-by-sold_count for this run: the long tail\n` +
+      `  will NOT be snapshotted and cannot earn hasRealDelta.\n` +
+      `  ${"!".repeat(60)}\n`
+    );
+    const fallback = await fetchEligible({
+      column: "sold_count",
+      ascending: false,
+      nullsFirst: false,
+      limit: total,
+      label: "fallback",
+    });
+    rotation = { ids: fallback.ids, error: null };
+  }
+
+  // Union, hot first — a product can legitimately appear in both tiers (a
+  // top seller that is also overdue); it must still only be fetched once.
+  const seen = new Set();
+  const trackedSet = [];
+  for (const id of [...hot.ids, ...rotation.ids]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    trackedSet.push(id);
+    if (trackedSet.length >= total) break;
+  }
+
+  const overlap = hot.ids.length + rotation.ids.length - trackedSet.length;
+  console.log(
+    `  Tracked set: ${trackedSet.length} products` +
+    (degraded
+      ? ` (DEGRADED: top by sold_count)`
+      : ` (${hot.ids.length} hot by sold_count + ${rotation.ids.length} rotation by oldest snapshot, ${overlap} overlap)`) +
+    ` | concurrency ${SNAPSHOT_CONCURRENCY}`
+  );
 
   const parseNum = (v) =>
     v != null ? parseFloat(String(v).replace(/[^0-9.]/g, "")) || null : null;
@@ -1050,6 +1165,10 @@ async function phase3(limitOverride) {
   console.log(`  Fetched fresh: ${fetched} | 404 (marked): ${p404} | transient errors: ${errors} | 402 credit failures: ${credit402}`);
 
   // Write snapshots (preserve composite-key upsert + insert fallback).
+  // Track which ones actually landed — only those may advance the rotation
+  // cursor, or a failed write would move a product to the back of the queue
+  // without a snapshot to show for it.
+  const written = [];
   for (let i = 0; i < snapshots.length; i += 500) {
     const chunk = snapshots.slice(i, i + 500);
     const { error } = await supabase.from("product_snapshots").upsert(chunk, {
@@ -1062,10 +1181,35 @@ async function phase3(limitOverride) {
         .insert(chunk);
       if (insertErr)
         console.error("  [ERROR] Snapshots insert:", insertErr.message);
-      else stats.phase3_snapshots += chunk.length;
+      else {
+        stats.phase3_snapshots += chunk.length;
+        written.push(...chunk.map((s) => s.product_id));
+      }
     } else {
       stats.phase3_snapshots += chunk.length;
+      written.push(...chunk.map((s) => s.product_id));
     }
+  }
+
+  // Advance the rotation cursor for everything captured this run. Products that
+  // failed transiently are deliberately left untouched: they keep their old
+  // last_snapshot_date, stay near the front of the queue, and are retried on the
+  // next run rather than waiting out a full cycle. Skipped when the column is
+  // missing — the degraded path above already explained why.
+  if (!degraded && written.length) {
+    let advanced = 0;
+    for (let i = 0; i < written.length; i += 500) {
+      const chunk = written.slice(i, i + 500);
+      const { error } = await supabase
+        .from("products")
+        .update({ last_snapshot_date: snapshotDate })
+        .in("product_id", chunk);
+      if (error)
+        console.error("  [ERROR] Advancing rotation cursor:", error.message);
+      else advanced += chunk.length;
+    }
+    stats.phase3_rotation_advanced = advanced;
+    console.log(`  Rotation cursor advanced for ${advanced} products`);
   }
 
   // Mark permanently-unavailable (404) products so future runs skip them.
@@ -1291,6 +1435,7 @@ async function main() {
   console.log(`  Phase 1 — Products from videos: ${stats.phase1_products}`);
   console.log(`  Phase 2 — Products from shop:   ${stats.phase2_products}`);
   console.log(`  Phase 3 — Snapshots created:    ${stats.phase3_snapshots}`);
+  console.log(`  Phase 3 — Rotation advanced:    ${stats.phase3_rotation_advanced}`);
   console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);

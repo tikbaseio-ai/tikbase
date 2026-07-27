@@ -8,7 +8,12 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    # Phase 3 now snapshots ~6,000 products/run (hot + rotation) instead of 3,000.
+    # At the measured ~3.49 products/sec that is ~29 min of Phase 3 versus ~14,
+    # and observed end-to-end runs already ranged 137-165 min against the old
+    # 180-minute cap. Raised to leave real headroom — GitHub only bills the
+    # minutes actually used, so a higher ceiling costs nothing on a normal run.
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repository
@@ -22,11 +27,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Phase 3 snapshot budget, stated explicitly so the daily ScrapeCreators
+      # spend is visible here rather than buried in a default. HOT re-snapshots
+      # the top sellers every run; ROTATION drains the least-recently-snapshotted
+      # tail so every product is covered on a ~7.5-day cycle (needed for the
+      # 7-day window's delta, see MAX_SPAN_RATIO in api/top-products.ts).
+      # Total = 6,000 calls/day. Lower both to cut spend; the cycle lengthens
+      # proportionally and windows shorter than the cycle stop earning real deltas.
       - name: Run daily refresh pipeline
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SNAPSHOT_HOT_LIMIT: "1500"
+          SNAPSHOT_ROTATION_LIMIT: "4500"
         run: node pipeline/tikbase-daily-refresh.js
 
       # Deepen video coverage for under-covered ranked products. Capped at 150/day

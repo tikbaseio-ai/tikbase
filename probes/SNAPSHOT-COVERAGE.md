@@ -216,13 +216,37 @@ products?select=sold_count&sold_count=gt.0&price_unavailable=not.is.true
 -> {"sold_count": 23834}
 ```
 
-## 6. No fixes applied
+## 6. Fix
 
-Findings only, as scoped. The obvious remediation directions — none implemented, none
-validated for API-credit cost:
+Shipped in the same PR as this document.
 
-- Raise `SNAPSHOT_TRACKED_LIMIT` (linear increase in ScrapeCreators calls per run).
-- Add a round-robin or least-recently-snapshotted tier so the tail is sampled on a rotation
-  rather than never.
-- Seed one snapshot at product-discovery time in Phase 1/2, so `daysActive` and the delta
-  model always have a floor row to work from.
+`phase3()` now draws its budget in two tiers from the same eligible pool:
+
+- **hot** (`SNAPSHOT_HOT_LIMIT`, 1500) — top by `sold_count`, re-snapshotted every run, so
+  the head of every ranking keeps a fresh day-over-day delta.
+- **rotation** (`SNAPSHOT_ROTATION_LIMIT`, 4500) — least-recently-snapshotted first, NULLs
+  ahead of everything else, so the 16,557 never-snapshotted products drain first and the
+  tail is covered on a ~7.5-day cycle.
+
+Rotation ordering needs a cursor, so `products.last_snapshot_date` is added and backfilled
+by `pipeline/last-snapshot-date.sql` — **a manual step, run before merging**. `phase3()`
+advances the cursor only for products whose snapshot row actually landed; transient
+failures keep their old cursor and are retried next run rather than waiting out a cycle.
+
+Why 4,500/run: `MAX_SPAN_RATIO = 1.5` in `api/top-products.ts` rejects any delta whose
+baseline→latest span falls outside `periodDays/1.5 .. periodDays*1.5`. The shortest window
+is 7 days, so a product must be revisited at least every ~10.5 days to be capable of
+earning `hasRealDelta` there. 33.8k tail ÷ 4,500 ≈ 7.5 days, inside that ceiling.
+
+Cost: 6,000 ScrapeCreators calls/day, up from 3,000. Phase 3 goes from ~14 min to ~29 min
+at the measured 3.49 products/sec, so the workflow `timeout-minutes` moves 180 → 300.
+
+Not done, still open:
+
+- Nothing seeds a snapshot at discovery time in Phase 1/2. Products discovered mid-run now
+  enter rotation with a NULL cursor and so are picked up on the *next* run rather than
+  needing a full cycle, which makes this much less urgent — but a discovery-time seed would
+  close the gap entirely.
+- The two unreliable runs (2026-07-19 partial, 2026-07-20 empty) are untouched; this change
+  does not make the daily job more robust, and a missed run now costs a day of rotation
+  progress rather than just a day of top-3000 freshness.

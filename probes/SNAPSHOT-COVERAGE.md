@@ -275,12 +275,17 @@ product's entire lifetime volume as one period's delta. Phase 1 products instead
 first snapshot from the next run's rotation, which picks them up immediately — they enter
 with a NULL cursor and rotation is NULLS FIRST.
 
-### Dead products
+### Dead products, and the latch that mislabels some of them
 
 `computeTopProducts` now excludes `price_unavailable` rows, so products that 404ed upstream
-stop being ranked and fall out of `rankings_cache` on the next nightly precompute. Measured
-2026-07-27: 1,372 dead-but-selling products were rank-eligible, 45 of them already inside
-the served set.
+stop being ranked and fall out of `rankings_cache` on the next nightly precompute. That
+removes 1,372 rank-eligible products, 45 of them already inside the served set.
+
+1,372 is 28x the 45 the change targeted, so the flag was audited (§8). It is **partly
+contaminated**: `price_unavailable` is set on a single unconfirmed 404 and, until this PR,
+no code path ever cleared it. Phase 4 now clears the flag whenever a fetch returns 200, and
+the migration resets it once for still-selling products. The ranking exclusion itself is
+kept — it is correct for the genuinely-dead majority.
 
 ### Cost
 
@@ -323,3 +328,51 @@ calls.
 `d5f5e0b` fixed the visibility: 402s are now counted separately and the summary prints a
 CREDIT WALL banner. It did **not** change the exit code — a fully credit-starved run still
 reported success. This PR closes that: `stats.api_402 > 0` now exits non-zero.
+
+## 8. Audit: is `price_unavailable` trustworthy?
+
+Prompted by the ranking exclusion removing 1,372 products against the 45 it targeted.
+
+**No code path clears the flag.** Two writers, both one-way:
+`pipeline/tikbase-daily-refresh.js:1414` and `pipeline/backfill-prices.js:150`, each
+`.update({ price_unavailable: true })` on a **single** 404 — no retry, no confirmation.
+Nothing anywhere writes `false` or `null`. One transient 404 removed a product from ranking
+and snapshotting permanently.
+
+**The flag cannot be dated.** There is no set-at column, and the obvious proxies fail:
+1,339 of the 1,372 have their last snapshot on exactly **2026-06-27** — the day the pipeline
+stopped snapshotting every product (§3), not the day they were flagged. Zero predate
+06-25. `updated_at` puts 1,349 of 1,372 before the 2026-07-08 `region=US` fix (`d04d890`),
+but `updated_at` tracks re-discovery by Phases 1/2, not flag time. So "how many predate the
+region fix" is **not answerable** from the data available.
+
+**Liveness sample — the flag is contaminated.** Five flagged products fetched live on
+2026-07-27, selected from the most-likely-alive end of the distribution (pre-era, still
+growing at flag time):
+
+| product_id | result |
+|---|---|
+| 1729386005232653237 | 404 |
+| 1729451569154592995 | 404 |
+| 1729489976386949585 | 404 |
+| 1729435668505137555 | 404 |
+| **1730154985083670905** | **200 — alive** |
+
+The live one returns `success: true`, `status: 1`, seller "ToryTale", price $27.99, and
+**sold_count 137,916 against 134,044 stored — 3,872 units sold while excluded as dead.**
+That is the "impossible if delisted" signal.
+
+Because the sample was deliberately biased toward likely-alive rows, 1-in-5 is closer to an
+upper bound than a central estimate, and 4-of-5 confirms the majority really are gone. The
+finding is not "the flag is wrong" but "the flag is wrong sometimes and can never
+self-correct."
+
+**Verdict: (B) contaminated — narrowed rather than reverted.** The ranking exclusion stays.
+Phase 4 gains a clear-on-200, and the migration resets the flag once for still-selling
+products. Phase 4 is the only viable clear point: its query filters on `sale_price`/
+`sold_count` only, so it still fetches flagged products; Phase 3's tracked set excludes them
+by construction, so a clear there could never fire.
+
+Residual, not addressed: a *future* false positive on a product Phase 4 never selects (one
+that has both a price and a sold_count) is still permanent. Closing that needs periodic
+re-admission of flagged rows, which is a bigger change than this PR should carry.

@@ -142,6 +142,7 @@ const stats = {
   phase3_related_inserted: 0,
   phase3_related_updated: 0,
   phase4_prices_filled: 0,
+  phase4_revived: 0,
   phase5_thumbnails: 0,
   api_failures: 0,
   api_402: 0,
@@ -1473,7 +1474,7 @@ async function phase4() {
   const MAX_LOOKUPS = 200;
   const { data: products, error } = await supabase
     .from("products")
-    .select("product_id, sale_price, sold_count")
+    .select("product_id, sale_price, sold_count, price_unavailable")
     .or("sale_price.is.null,sale_price.eq.0,sold_count.is.null,sold_count.eq.0")
     .limit(MAX_LOOKUPS);
 
@@ -1485,6 +1486,7 @@ async function phase4() {
   console.log(`  Found ${products?.length || 0} products needing price/sold data (max ${MAX_LOOKUPS} per run)`);
 
   let filled = 0;
+  let revived = 0;
   for (const p of products || []) {
     // Skip if failed 3+ times
     if ((failTracker[p.product_id] || 0) >= 3) continue;
@@ -1506,6 +1508,27 @@ async function phase4() {
       const pb = data?.product_base;
       const updateFields = { updated_at: new Date().toISOString() };
       let hasUpdate = false;
+
+      // Reaching here means apiFetch got a 2xx — the listing resolves, so the
+      // product is NOT dead. price_unavailable was a one-way latch: it is set
+      // on a single unconfirmed 404 (phase3, and backfill-prices.js) and
+      // nothing ever cleared it, so one transient 404 removed a product from
+      // ranking and snapshotting permanently.
+      //
+      // Verified 2026-07-27: product 1730154985083670905 was flagged, yet a
+      // live fetch returned 200 with sold_count 137,916 against 134,044 stored
+      // — 3,872 units sold while it was excluded as "dead".
+      //
+      // Phase 4 is the right place for this: its query filters on
+      // sale_price/sold_count only, so it still fetches flagged products every
+      // run. Phase 3 cannot host the clear — its tracked set excludes
+      // price_unavailable rows by construction, so flagged products are never
+      // fetched there and the latch could never open.
+      if (p.price_unavailable === true) {
+        updateFields.price_unavailable = false;
+        hasUpdate = true;
+        revived++;
+      }
 
       // Fill price if available
       if (price != null && parseFloat(price) > 0) {
@@ -1555,6 +1578,13 @@ async function phase4() {
   writeFileSync(failTrackerPath, JSON.stringify(failTracker, null, 2));
 
   stats.phase4_prices_filled = filled;
+  if (revived) {
+    console.log(
+      `  Phase 4 revived ${revived} products: fetch returned 200, so a stale ` +
+      `price_unavailable latch was cleared (they re-enter ranking + snapshotting)`
+    );
+  }
+  stats.phase4_revived = revived;
   console.log(`  Phase 4 done: ${filled} prices filled`);
 }
 
@@ -1639,6 +1669,7 @@ async function main() {
   console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);
+  console.log(`  Phase 4 — Revived (flag cleared): ${stats.phase4_revived}`);
   console.log(`  Phase 5 — Thumbnails refreshed: ${stats.phase5_thumbnails}`);
   console.log(`  API failures:                   ${stats.api_failures} (402 / credit wall: ${stats.api_402})`);
   console.log(`\n  Total time: ${elapsed}s`);

@@ -307,7 +307,14 @@ export async function computeTopProducts(
 ): Promise<any[]> {
   const supabase = getAdminClient();
 
-  // 1. Fetch products with sales
+  // 1. Fetch products with sales.
+  // price_unavailable is set by the pipeline when a product 404s at TikTok —
+  // it is gone upstream, so ranking it serves a dead listing and keeps it in
+  // rankings_cache, where the snapshot membership monitor then counts it as a
+  // served product that never refreshes (it is excluded from fetching for the
+  // same reason). Excluding it here drops those rows out of the cache on the
+  // next nightly precompute. Measured 2026-07-27: 45 such products were being
+  // served.
   let products: any[] = [];
   if (nicheSlug === 'all') {
     let offset = 0;
@@ -316,6 +323,7 @@ export async function computeTopProducts(
         .from('products')
         .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
         .gt('sold_count', 0)
+        .not('price_unavailable', 'is', true)
         .order('sold_count', { ascending: false })
         .range(offset, offset + 999);
       if (!data || data.length === 0) break;
@@ -331,6 +339,7 @@ export async function computeTopProducts(
         .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
         .eq('niche_slug', nicheSlug)
         .gt('sold_count', 0)
+        .not('price_unavailable', 'is', true)
         .range(offset, offset + 999);
       if (!data || data.length === 0) break;
       products = products.concat(data);

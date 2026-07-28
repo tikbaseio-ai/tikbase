@@ -53,22 +53,24 @@ const REGION = process.env.SCRAPECREATORS_REGION || "US";
 // The set is drawn in two tiers from the same eligible pool — sold_count>0 and
 // not price_unavailable:
 //
-//   HOT      — every product currently served from rankings_cache (the
-//              membership guarantee), UNION the highest lifetime sold_count up
-//              to SNAPSHOT_HOT_LIMIT. Re-snapshotted EVERY run, so nothing a
-//              user can page to goes stale and the head of every ranking keeps
-//              a fresh day-over-day delta.
+//   HOT      — highest lifetime sold_count, re-snapshotted EVERY run, so the
+//              head of every ranking keeps a fresh day-over-day delta.
 //   ROTATION — least-recently-snapshotted, NULLs (never snapshotted) first, so
 //              the long tail is covered on a bounded cycle instead of never.
 //
-// The membership guarantee is the dominant term, not the top-N. Measured
-// 2026-07-27: rankings_cache holds 10,738 distinct products, of which only
-// 1,232 were in the top 1,500 by sold_count — so 9,506 served products were
-// missing from the hot tier, and 2,902 of those had never been snapshotted at
-// all despite being paged through by users. sold_count rank is simply not a
-// proxy for "is being served": the cache is ranked per niche AND per timeframe
-// (15 x 6 x 400 slots), so a mid-volume product can top a narrow niche while
-// sitting far below any global cutoff.
+// Products served from rankings_cache are deliberately NOT a fetch tier. The
+// rotation cycle already keeps them inside valid delta spans: MAX_SPAN_RATIO
+// (1.5) in api/top-products.ts accepts a baseline->latest span of
+// periodDays/1.5 .. periodDays*1.5, so the tightest window (7d) accepts
+// 4.7-10.5 days. A ~7.5-day rotation sits inside that band for every timeframe,
+// which means a member re-snapshotted once per cycle can still earn
+// hasRealDelta everywhere. Fetching all ~10.7k members daily would buy same-day
+// freshness, which only the head of the ranking actually needs — and the head
+// is already the hot tier. It would cost ~5x the credits for that.
+//
+// Coverage is verified rather than assumed: reportMembershipAges() below runs
+// at end of pipeline and reports member snapshot ages against the 10.5-day
+// ceiling. If members start aging past it, raise SNAPSHOT_ROTATION_LIMIT.
 //
 // Why a rotation rather than a bigger top-N: ordering the whole budget by
 // sold_count is a fixed point. The same products win every run, so anything
@@ -84,25 +86,24 @@ const REGION = process.env.SCRAPECREATORS_REGION || "US";
 // rotation clears the tail in ~7.5 days — inside that ceiling with margin.
 //
 // Cost/time: measured throughput is ~3.49 products/sec for the whole of Phase 3
-// (fetch + related_videos mining) at concurrency 10. With the membership
-// guarantee the hot tier is ~11.0k, so a run is ~15.5k fetches — roughly 74 min
-// of Phase 3 and 15.5k API credits/day, against 3,000/day before this change.
-// THAT IS A ~5x INCREASE IN DAILY CREDIT SPEND. It is the floor implied by the
-// guarantee: the hot tier cannot be smaller than the set of products being
-// served. Levers, in the order worth reaching for:
-//   1. SNAPSHOT_ROTATION_LIMIT — cut the tail cycle, keeps the guarantee intact.
-//   2. STORE_TOP_N_PRODUCTS in precompute-rankings.ts (currently 400) — shrinks
-//      the cache itself, which shrinks the guarantee at its source.
-//   3. SNAPSHOT_CACHE_MEMBERSHIP=0 — disables the guarantee entirely. Escape
-//      hatch for a credit emergency (see the 2026-07-19/20 wall in the PR
-//      description), not a normal setting: served products go stale again.
+// (fetch + related_videos mining) at concurrency 10. 6,000/run is ~29 min of
+// Phase 3 and 6,000 API credits/day, against 3,000/day before this change.
+// Levers if the membership monitor shows members aging past ~9 days:
+//   1. Per-niche hot coverage — give each niche its own small hot allocation
+//      instead of one global top-N. Cheapest real fix: the cache is ranked per
+//      niche, so a global sold_count cutoff under-serves narrow niches, which
+//      is exactly where aging members concentrate.
+//   2. SNAPSHOT_ROTATION_LIMIT — shortens the cycle across the board.
+//   3. STORE_TOP_N_PRODUCTS in precompute-rankings.ts (currently 400) — shrinks
+//      the cache, and so the set being monitored, at source.
 const SNAPSHOT_HOT_LIMIT = Number(process.env.SNAPSHOT_HOT_LIMIT) || 1500;
 const SNAPSHOT_ROTATION_LIMIT = Number(process.env.SNAPSHOT_ROTATION_LIMIT) || 4500;
-const SNAPSHOT_CACHE_MEMBERSHIP = process.env.SNAPSHOT_CACHE_MEMBERSHIP !== "0";
+// The span ceiling the rotation cycle has to stay under: MAX_SPAN_RATIO=1.5 in
+// api/top-products.ts against the tightest (7-day) window.
+const MEMBER_AGE_SLA_DAYS = 10.5;
+const MEMBER_AGE_WARN_DAYS = 9;
 // Legacy single-cap override. Still honoured when set: it caps the COMBINED
-// tracked set, split between top-by-sold and rotation in their configured
-// ratio. Because it is a hard ceiling it necessarily breaks the membership
-// guarantee, so setting it skips the cache-member tier and logs a warning.
+// tracked set, split between hot and rotation in their configured ratio.
 const SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 0;
 const SNAPSHOT_CONCURRENCY = 10;
 
@@ -133,9 +134,11 @@ const stats = {
   phase1_videos: 0,
   phase1_products: 0,
   phase2_products: 0,
+  phase2_birth_snapshots: 0,
   phase3_snapshots: 0,
   phase3_rotation_advanced: 0,
-  phase3_cache_members: 0,
+  phase3_member_max_age: 0,
+  phase3_members_over_warn: 0,
   phase3_related_inserted: 0,
   phase3_related_updated: 0,
   phase4_prices_filled: 0,
@@ -157,6 +160,73 @@ function recordApiFailure(err) {
   const credit = isCreditError(err);
   if (credit) stats.api_402++;
   return credit;
+}
+
+// --- birth snapshots -------------------------------------------------------
+// Which of these product_ids are not yet in the products table. Called BEFORE
+// the upsert, so "new" means new. On any error it returns an empty set, so a
+// failed lookup seeds nothing rather than mis-seeding everything.
+async function findNewProductIds(ids) {
+  const existing = new Set();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const { data, error } = await supabase
+      .from("products")
+      .select("product_id")
+      .in("product_id", chunk);
+    if (error) {
+      console.error("  [WARN] birth-snapshot existence check failed:", error.message);
+      return new Set();
+    }
+    for (const r of data || []) existing.add(r.product_id);
+  }
+  return new Set(ids.filter((id) => !existing.has(id)));
+}
+
+// Write a first ("birth") snapshot for newly-discovered products, from the
+// sold_count/price already present in the discovery payload. Zero API cost.
+//
+// Without this a new product has no snapshot until rotation reaches it, so its
+// delta baseline starts a cycle late. Seeding at insert gives the delta model a
+// floor row from day one.
+//
+// Only Phase 2 (shop search) can do this: its payload carries sold_info, so a
+// real sold_count is available. Phase 1 (keyword video discovery) extracts
+// products from video anchors, which carry no sold_count at all — seeding a
+// null-sold_count row there would be worse than nothing, because
+// api/top-products.ts coerces a null baseline to 0 and would read the product's
+// entire lifetime volume as one period's delta. Phase 1 products therefore get
+// their first snapshot from the next run's rotation instead, which picks them
+// up immediately: they enter with last_snapshot_date NULL and rotation orders
+// ASC NULLS FIRST.
+async function seedBirthSnapshots(products) {
+  const rows = products
+    .filter((p) => p.sold_count != null)
+    .map((p) => ({
+      product_id: String(p.product_id),
+      sold_count: p.sold_count,
+      sale_price: p.sale_price ?? null,
+      stock_quantity: p.stock_quantity ?? null,
+      snapshot_date: today(),
+    }));
+  if (!rows.length) return 0;
+
+  let seeded = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    // ignoreDuplicates → ON CONFLICT DO NOTHING on (product_id, snapshot_date).
+    // Phase 3 runs later in the same process and upserts with
+    // ignoreDuplicates:false, so a fresh-fetched value always wins over a seed.
+    const { error } = await supabase
+      .from("product_snapshots")
+      .upsert(chunk, {
+        onConflict: "product_id,snapshot_date",
+        ignoreDuplicates: true,
+      });
+    if (error) console.error("  [WARN] birth snapshot insert:", error.message);
+    else seeded += chunk.length;
+  }
+  return seeded;
 }
 
 // ---------------------------------------------------------------------------
@@ -828,6 +898,10 @@ async function phase2() {
       }, {})
     );
 
+    // Identify the genuinely-new ones BEFORE the upsert, so they can be given a
+    // birth snapshot below.
+    const newIds = await findNewProductIds(dedupedProducts.map((p) => p.product_id));
+
     for (let i = 0; i < dedupedProducts.length; i += 500) {
       const chunk = dedupedProducts.slice(i, i + 500);
       const { error } = await supabase
@@ -835,6 +909,16 @@ async function phase2() {
         .upsert(chunk, { onConflict: "product_id", ignoreDuplicates: false });
       if (error) console.error("  [ERROR] Shop products upsert:", error.message);
       else stats.phase2_products += chunk.length;
+    }
+
+    if (newIds.size) {
+      stats.phase2_birth_snapshots = await seedBirthSnapshots(
+        dedupedProducts.filter((p) => newIds.has(p.product_id))
+      );
+      console.log(
+        `  Phase 2 birth snapshots: ${stats.phase2_birth_snapshots} seeded ` +
+        `(of ${newIds.size} new products; the rest had no sold_count)`
+      );
     }
   }
 
@@ -1058,26 +1142,87 @@ async function fetchEligible({ column, ascending, nullsFirst, limit, label }) {
   return { ids: ids.slice(0, limit), error: null };
 }
 
-// Every product currently served from rankings_cache, via the SQL view added by
-// pipeline/last-snapshot-date.sql. The view already drops price_unavailable rows
-// (404ed upstream — re-fetching one burns a credit every run forever), so what
-// comes back is exactly the set the hot tier must contain.
-async function fetchCacheMembers() {
-  const ids = [];
+// Membership MONITOR. Products served from rankings_cache are not a fetch tier
+// (see the config block for the span math); rotation is expected to keep them
+// fresh enough on its own. This checks whether that is actually true, rather
+// than assuming it — it reads the cursor for every served product and reports
+// the age distribution against the MAX_SPAN_RATIO ceiling.
+//
+// Deliberately never fails the run: aging members self-heal, because rotation
+// orders by last_snapshot_date ASC NULLS FIRST, so the stalest members are
+// exactly what the next run picks up first. The banner is a signal to raise
+// SNAPSHOT_ROTATION_LIMIT (or add per-niche hot coverage), not an incident.
+async function reportMembershipAges() {
+  const rows = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("rankings_cache_members")
-      .select("product_id")
+      .select("product_id,last_snapshot_date")
       .range(from, from + 999);
     if (error) {
-      console.error("  [ERROR] Fetching rankings_cache members:", error.message);
-      return { ids, error };
+      console.error(
+        `  [WARN] Membership monitor unavailable: ${error.message}\n` +
+        `         (run pipeline/last-snapshot-date.sql to enable it)`
+      );
+      return;
     }
     if (!data || data.length === 0) break;
-    ids.push(...data.map((r) => r.product_id).filter(Boolean));
+    rows.push(...data);
     if (data.length < 1000) break;
   }
-  return { ids, error: null };
+  if (!rows.length) {
+    console.log("  Membership monitor: rankings_cache is empty — nothing to check");
+    return;
+  }
+
+  // Age in days from the cursor. A null cursor means never snapshotted, which
+  // is unbounded staleness, not zero — score it as Infinity so it cannot hide
+  // inside a percentile.
+  const todayMs = Date.parse(today());
+  const aged = rows.map((r) => ({
+    product_id: r.product_id,
+    age: r.last_snapshot_date
+      ? (todayMs - Date.parse(r.last_snapshot_date)) / 86400000
+      : Infinity,
+  }));
+  aged.sort((a, b) => a.age - b.age);
+
+  const never = aged.filter((a) => a.age === Infinity).length;
+  const finite = aged.filter((a) => a.age !== Infinity);
+  const p95 = aged[Math.min(aged.length - 1, Math.floor(aged.length * 0.95))].age;
+  const max = aged[aged.length - 1].age;
+  const overWarn = aged.filter((a) => a.age > MEMBER_AGE_WARN_DAYS).length;
+  const breaching = aged.filter((a) => a.age > MEMBER_AGE_SLA_DAYS);
+
+  const fmt = (v) => (v === Infinity ? "never" : `${v.toFixed(1)}d`);
+  stats.phase3_member_max_age = max === Infinity ? -1 : Math.round(max * 10) / 10;
+  stats.phase3_members_over_warn = overWarn;
+
+  console.log(
+    `  Membership monitor: ${rows.length} served products | ` +
+    `max ${fmt(max)} | p95 ${fmt(p95)} | ` +
+    `>${MEMBER_AGE_WARN_DAYS}d: ${overWarn}` +
+    (never ? ` | never snapshotted: ${never}` : "") +
+    (finite.length ? ` | median ${fmt(finite[Math.floor(finite.length / 2)].age)}` : "")
+  );
+
+  if (breaching.length) {
+    const worst = breaching
+      .slice(-5)
+      .reverse()
+      .map((a) => `${a.product_id} (${fmt(a.age)})`)
+      .join(", ");
+    console.error(
+      `\n  ${"!".repeat(60)}\n` +
+      `  SLA BREACH: ${breaching.length} served products exceed ${MEMBER_AGE_SLA_DAYS}d\n` +
+      `  since their last snapshot. Past that span api/top-products.ts rejects\n` +
+      `  their 7-day delta (MAX_SPAN_RATIO=1.5) and they fall back to estimates.\n` +
+      `  Worst: ${worst}\n` +
+      `  This self-heals — rotation takes the stalest first — but if it persists,\n` +
+      `  add per-niche hot coverage or raise SNAPSHOT_ROTATION_LIMIT.\n` +
+      `  ${"!".repeat(60)}\n`
+    );
+  }
 }
 
 async function phase3(limitOverride) {
@@ -1085,59 +1230,29 @@ async function phase3(limitOverride) {
 
   const snapshotDate = today();
 
-  // Budget. The hot tier is NOT a fixed size: it is the membership guarantee
-  // (every served product) unioned with the top SNAPSHOT_HOT_LIMIT by
-  // sold_count, so it grows with the cache. Only the rotation tier is a dial.
-  // limitOverride (--phase3-only N) and the legacy SNAPSHOT_TRACKED_LIMIT cap
-  // the FINAL combined set for scoped test runs — which necessarily breaks the
-  // guarantee, so both say so out loud below.
+  // Budget split. limitOverride (--phase3-only N) and the legacy
+  // SNAPSHOT_TRACKED_LIMIT both cap the COMBINED set; the tiers keep their
+  // configured ratio so a scoped test run still exercises both paths.
   const hardCap = limitOverride ?? (SNAPSHOT_TRACKED_LIMIT || null);
-  const topNShare =
+  const hotShare =
     SNAPSHOT_HOT_LIMIT / (SNAPSHOT_HOT_LIMIT + SNAPSHOT_ROTATION_LIMIT);
-  const topNLimit = hardCap
-    ? Math.max(1, Math.round(hardCap * topNShare))
+  const hotLimit = hardCap
+    ? Math.max(1, Math.round(hardCap * hotShare))
     : SNAPSHOT_HOT_LIMIT;
   const rotationLimit = hardCap
-    ? Math.max(0, hardCap - topNLimit)
+    ? Math.max(0, hardCap - hotLimit)
     : SNAPSHOT_ROTATION_LIMIT;
 
-  // Tier 1a — the membership guarantee.
-  let members = { ids: [], error: null };
-  if (SNAPSHOT_CACHE_MEMBERSHIP && !hardCap) {
-    members = await fetchCacheMembers();
-    if (members.error) {
-      console.error(
-        `\n  ${"!".repeat(60)}\n` +
-        `  MEMBERSHIP GUARANTEE UNAVAILABLE — cannot read rankings_cache_members.\n` +
-        `  Run pipeline/last-snapshot-date.sql in the Supabase SQL editor.\n` +
-        `  Products served from rankings_cache will NOT all be refreshed this run.\n` +
-        `  ${"!".repeat(60)}\n`
-      );
-    }
-  } else if (!SNAPSHOT_CACHE_MEMBERSHIP) {
-    console.log("  [WARN] SNAPSHOT_CACHE_MEMBERSHIP=0 — membership guarantee DISABLED");
-  }
-
-  // Tier 1b — highest lifetime sold_count. We re-fetch FRESH values for these
-  // (not the stale stored row) so snapshots actually move day-over-day and the
-  // delta model can compute real units sold.
-  const topN = await fetchEligible({
+  // Tier 1 — hot: highest lifetime sold_count. We re-fetch FRESH values for
+  // these (not the stale stored row) so snapshots actually move day-over-day
+  // and the delta model can compute real units sold.
+  const hot = await fetchEligible({
     column: "sold_count",
     ascending: false,
     nullsFirst: false,
-    limit: topNLimit,
-    label: "top-by-sold",
+    limit: hotLimit,
+    label: "hot",
   });
-
-  // Hot = members ∪ top-N, members first so the guarantee survives any cap.
-  const hotSeen = new Set();
-  const hotIds = [];
-  for (const id of [...members.ids, ...topN.ids]) {
-    if (hotSeen.has(id)) continue;
-    hotSeen.add(id);
-    hotIds.push(id);
-  }
-  const hot = { ids: hotIds, error: null };
 
   // Tier 2 — rotation: least-recently-snapshotted first, NULLs (never
   // snapshotted) ahead of everything else, so the backlog drains before the
@@ -1195,32 +1310,10 @@ async function phase3(limitOverride) {
   const overlap = hot.ids.length + rotation.ids.length - trackedSet.length;
   console.log(
     `  Tracked set: ${trackedSet.length} products (` +
-    `${hot.ids.length} hot [${members.ids.length} cache members + ${topN.ids.length} top-by-sold, ` +
-    `${members.ids.length + topN.ids.length - hot.ids.length} shared] + ` +
+    `${hot.ids.length} hot by sold_count + ` +
     `${rotation.ids.length} ${degraded ? "FALLBACK top-by-sold" : "rotation by oldest snapshot"}, ` +
     `${overlap} overlap) | concurrency ${SNAPSHOT_CONCURRENCY}`
   );
-  if (hardCap) {
-    console.log(
-      `  [WARN] Capped at ${hardCap} (scoped run) — membership guarantee NOT honoured`
-    );
-  }
-
-  // Verify the invariant rather than trusting the union that just built it —
-  // this is the whole point of the tier, and a silent miss means products the
-  // UI is actively serving quietly stop refreshing.
-  if (members.ids.length) {
-    const missing = members.ids.filter((id) => !seen.has(id));
-    if (missing.length) {
-      console.error(
-        `  [ERROR] MEMBERSHIP GUARANTEE BROKEN: ${missing.length} served products ` +
-        `absent from the tracked set (e.g. ${missing.slice(0, 3).join(", ")})`
-      );
-    } else {
-      console.log(`  Membership guarantee OK: all ${members.ids.length} served products included`);
-    }
-    stats.phase3_cache_members = members.ids.length;
-  }
 
   const parseNum = (v) =>
     v != null ? parseFloat(String(v).replace(/[^0-9.]/g, "")) || null : null;
@@ -1529,15 +1622,20 @@ async function main() {
   await phase4();
   await phase5();
 
+  // Runs after phase3 has advanced the cursor, so it measures the state the
+  // next run will actually inherit. Never throws the run — see the function.
+  await reportMembershipAges();
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
   console.log("\n========== SUMMARY ==========\n");
   console.log(`  Phase 1 — Videos discovered:    ${stats.phase1_videos}`);
   console.log(`  Phase 1 — Products from videos: ${stats.phase1_products}`);
   console.log(`  Phase 2 — Products from shop:   ${stats.phase2_products}`);
+  console.log(`  Phase 2 — Birth snapshots:      ${stats.phase2_birth_snapshots}`);
   console.log(`  Phase 3 — Snapshots created:    ${stats.phase3_snapshots}`);
   console.log(`  Phase 3 — Rotation advanced:    ${stats.phase3_rotation_advanced}`);
-  console.log(`  Phase 3 — Cache members held:   ${stats.phase3_cache_members}`);
+  console.log(`  Phase 3 — Member max age:       ${stats.phase3_member_max_age < 0 ? "never-snapshotted present" : stats.phase3_member_max_age + "d"} (>${MEMBER_AGE_WARN_DAYS}d: ${stats.phase3_members_over_warn})`);
   console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);
@@ -1553,8 +1651,21 @@ async function main() {
       `  402 = out of credits OR an invalid/revoked API key (the vendor returns it for both).\n` +
       `  The phase counts above are INCOMPLETE — snapshots/prices/videos were skipped.\n` +
       `  Top up credits and re-run before trusting today's data.\n` +
+      `  Exiting NON-ZERO so this run shows red in Actions.\n` +
       `  ${"!".repeat(60)}`
     );
+    // Exit red. Before this, a fully credit-starved run reported success: on
+    // 2026-07-20 every phase finished at 0 and the job was still green, so the
+    // outage was invisible until someone read the logs.
+    //
+    // Safe to fail loudly because the run is resumable by construction —
+    // rotation orders by last_snapshot_date ASC NULLS FIRST and the cursor only
+    // advances for products whose snapshot row actually landed. Whatever a
+    // credit-starved run failed to fetch keeps its old (or NULL) cursor and is
+    // therefore at the FRONT of the queue on the next run. No state to unwind,
+    // no manual catch-up: topping up credits and letting the next cron fire is
+    // the whole recovery procedure.
+    process.exitCode = 1;
   }
   console.log(`\ntikbase daily refresh completed at ${new Date().toISOString()}`);
 }
@@ -1565,7 +1676,7 @@ async function main() {
 if (process.argv.includes("--phase3-only")) {
   const n = process.argv.slice(2).find((a) => /^\d+$/.test(a));
   phase3(n ? Number(n) : undefined)
-    .then(() => process.exit(0))
+    .then(() => process.exit(stats.api_402 > 0 ? 1 : 0))
     .catch((err) => { console.error("Fatal error:", err); process.exit(1); });
 } else {
   main().catch((err) => {

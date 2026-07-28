@@ -222,51 +222,84 @@ Shipped in the same PR as this document.
 
 `phase3()` now draws its budget in two tiers from the same eligible pool:
 
-- **hot** (~11,006) — every product currently served from `rankings_cache` (the membership
-  guarantee, ~10,738) UNION the top `SNAPSHOT_HOT_LIMIT` (1500) by `sold_count`.
-  Re-snapshotted every run.
+- **hot** (`SNAPSHOT_HOT_LIMIT`, 1500) — top by `sold_count`, re-snapshotted every run, so
+  the head of every ranking keeps a fresh day-over-day delta.
 - **rotation** (`SNAPSHOT_ROTATION_LIMIT`, 4500) — least-recently-snapshotted first, NULLs
-  ahead of everything else, so the never-snapshotted backlog drains first and the remaining
-  tail is covered on a ~5.5-day cycle.
+  ahead of everything else, so the 16,557 never-snapshotted products drain first and the
+  tail is covered on a ~7.5-day cycle.
 
-The membership guarantee turned out to be the dominant term. Ranking by `sold_count` is not
-a proxy for "is being served": `rankings_cache` is ranked per niche **and** per timeframe
-(15 x 6 x 400 slots), so a mid-volume product can top a narrow niche while sitting far below
-any global cutoff. Measured 2026-07-27: only **1,232 of 10,738** served products were in the
-top 1,500 by `sold_count` — **9,506 were missing**, and **2,902 of those had never been
-snapshotted at all** despite being paged through by users.
+Rotation ordering needs a cursor, so `products.last_snapshot_date` is added and backfilled
+by `pipeline/last-snapshot-date.sql` — **a manual step, run before merging**. `phase3()`
+advances the cursor only for products whose snapshot row actually landed; transient
+failures keep their old cursor and are retried next run rather than waiting out a cycle.
 
-Both tiers need SQL, applied by `pipeline/last-snapshot-date.sql` — **a manual step, run
-before merging**: `products.last_snapshot_date` as the rotation cursor, and a
-`rankings_cache_members` view that extracts the served product ids (locked to
-`service_role`, since an anon-readable list of every ranked product id would give away the
-free tier's 10-row cap). `phase3()` advances the cursor only for products whose snapshot row
-actually landed; transient failures keep their old cursor and are retried next run rather
-than waiting out a cycle. The invariant is verified each run, not assumed — a broken
-guarantee logs an explicit error.
+Why 4,500/run: `MAX_SPAN_RATIO = 1.5` in `api/top-products.ts` rejects any delta whose
+baseline→latest span falls outside `periodDays/1.5 .. periodDays*1.5`. The shortest window
+is 7 days, so the accepted band there is **4.7–10.5 days**. A ~7.5-day rotation sits inside
+that band for every timeframe.
 
-Why 4,500/run rotation: `MAX_SPAN_RATIO = 1.5` in `api/top-products.ts` rejects any delta
-whose baseline→latest span falls outside `periodDays/1.5 .. periodDays*1.5`. The shortest
-window is 7 days, so a product must be revisited at least every ~10.5 days to be capable of
-earning `hasRealDelta` there. With ~11.0k now covered daily by the hot tier, the remaining
-~24.6k tail ÷ 4,500 ≈ 5.5 days — comfortably inside that ceiling.
+### Membership is monitored, not fetched
 
-**Cost: ~15,500 ScrapeCreators calls/day, up from 3,000 — roughly 5x.** Phase 3 goes from
-~14 min to ~74 min at the measured 3.49 products/sec, so the workflow `timeout-minutes`
-moves 180 → 300. The 45 cache members already marked `price_unavailable` are excluded by the
-view rather than re-fetched daily forever; they should also be evicted from the cache.
+Products served from `rankings_cache` (10,738 of them, measured 2026-07-27) are **not** a
+fetch tier. The span math above is why: a member re-snapshotted once per ~7.5-day cycle is
+still inside the valid band for all timeframes, so it can still earn `hasRealDelta`.
+Fetching all of them daily would buy same-day freshness that only the head of the ranking
+needs — and the head is already the hot tier — at roughly 5× the credits.
+
+Instead `reportMembershipAges()` runs at end of pipeline and reports max age, p95, median,
+and the count past 9 days across the served set. If any member passes **10.5 days** it
+prints a loud SLA-BREACH banner naming the worst offenders. It never fails the run: aging
+members self-heal, because rotation orders `last_snapshot_date ASC NULLS FIRST` and the
+stalest members are exactly what the next run picks up first. The banner is the signal to
+dial up — per-niche hot coverage first (the cache is ranked per niche, so a global
+`sold_count` cutoff under-serves narrow niches, which is where aging concentrates), then
+`SNAPSHOT_ROTATION_LIMIT`.
+
+The membership set comes from a `rankings_cache_members` view, revoked from
+`anon`/`authenticated` and granted only to `service_role` — an anon-readable list of every
+ranked `product_id` would give away the free tier's 10-row cap.
+
+### Birth snapshots
+
+Phase 2 (shop search) now writes a first snapshot for each genuinely-new product from the
+`sold_count`/price already in its discovery payload — zero API cost — so a new product has a
+delta baseline from day one instead of waiting for rotation to reach it. New ids are
+identified before the upsert; the insert uses `ON CONFLICT DO NOTHING` on
+`(product_id, snapshot_date)`, and Phase 3 later in the same run overwrites any seed with a
+fresh-fetched value.
+
+**Phase 1 (keyword video discovery) is deliberately excluded.** Its products come from video
+anchors, which carry no `sold_count` at all. Seeding a null-`sold_count` row would be worse
+than nothing: `api/top-products.ts` coerces a null baseline to 0 and would read the
+product's entire lifetime volume as one period's delta. Phase 1 products instead get their
+first snapshot from the next run's rotation, which picks them up immediately — they enter
+with a NULL cursor and rotation is NULLS FIRST.
+
+### Dead products
+
+`computeTopProducts` now excludes `price_unavailable` rows, so products that 404ed upstream
+stop being ranked and fall out of `rankings_cache` on the next nightly precompute. Measured
+2026-07-27: 1,372 dead-but-selling products were rank-eligible, 45 of them already inside
+the served set.
+
+### Cost
+
+**6,000 snapshot calls/day** (~6,900 including phases 1/2/4/5), up from 3,000. Phase 3 goes
+from ~14 min to ~29 min at the measured 3.49 products/sec; workflow `timeout-minutes`
+180 → 240.
+
+### Credit-wall exit
+
+`stats.api_402 > 0` now sets a non-zero exit code, so a credit-starved run shows red instead
+of green (see §7). Safe to fail loudly because the run is resumable by construction: the
+cursor only advances for snapshots that landed, and rotation is `ASC NULLS FIRST`, so
+whatever a starved run missed is at the front of the queue next time. Topping up credits and
+letting the next cron fire is the entire recovery procedure.
 
 Not done, still open:
 
-- Nothing seeds a snapshot at discovery time in Phase 1/2. Products discovered mid-run now
-  enter rotation with a NULL cursor and so are picked up on the *next* run rather than
-  needing a full cycle, which makes this much less urgent — but a discovery-time seed would
-  close the gap entirely.
-- 45 products in `rankings_cache` are `price_unavailable` (404ed upstream) and still being
-  served. Excluded from fetching, but nothing evicts them from the cache.
-- The daily job still exits 0 on total credit exhaustion (see §7). This change raises the
-  stakes: a missed run now costs a day of rotation progress and leaves served products
-  stale, not just a day of top-3000 freshness.
+- 45 products in `rankings_cache` are `price_unavailable` and still served until the next
+  precompute evicts them. Nothing evicts them sooner.
 
 ## 7. Why 2026-07-19 and 07-20 failed
 
@@ -289,5 +322,4 @@ calls.
 
 `d5f5e0b` fixed the visibility: 402s are now counted separately and the summary prints a
 CREDIT WALL banner. It did **not** change the exit code — a fully credit-starved run still
-reports success. Given this change raises daily spend ~5x, failing the job when
-`stats.api_402 > 0` is worth doing, but it is out of scope here.
+reported success. This PR closes that: `stats.api_402 > 0` now exits non-zero.

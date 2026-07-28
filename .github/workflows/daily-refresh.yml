@@ -8,12 +8,12 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # Phase 3 now snapshots ~6,000 products/run (hot + rotation) instead of 3,000.
+    # Phase 3 now snapshots 6,000 products/run (hot + rotation) instead of 3,000.
     # At the measured ~3.49 products/sec that is ~29 min of Phase 3 versus ~14,
     # and observed end-to-end runs already ranged 137-165 min against the old
     # 180-minute cap. Raised to leave real headroom — GitHub only bills the
     # minutes actually used, so a higher ceiling costs nothing on a normal run.
-    timeout-minutes: 300
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
@@ -28,21 +28,20 @@ jobs:
         run: npm ci
 
       # Phase 3 snapshot budget, stated explicitly so the daily ScrapeCreators
-      # spend is visible here rather than buried in a default.
+      # spend is visible here rather than buried in a default. HOT re-snapshots
+      # the top sellers every run; ROTATION drains the least-recently-snapshotted
+      # tail so every product is covered on a ~7.5-day cycle — inside the 4.7-10.5
+      # day span band that MAX_SPAN_RATIO=1.5 allows for the tightest (7d) window,
+      # so a product seen once per cycle can still earn a real delta.
       #
-      # The hot tier is NOT bounded by SNAPSHOT_HOT_LIMIT alone: it is every
-      # product currently served from rankings_cache (~10.7k) UNION the top
-      # SNAPSHOT_HOT_LIMIT by sold_count, so ~11.0k. Plus ROTATION, which drains
-      # the least-recently-snapshotted tail so every product is covered on a
-      # ~5.5-day cycle (needed for the 7-day window's delta — see MAX_SPAN_RATIO
-      # in api/top-products.ts).
+      # TOTAL 6,000 snapshot calls/day (~6,900 including phases 1/2/4/5), up from
+      # 3,000. Products served from rankings_cache are monitored, not fetched
+      # daily — the end-of-run membership monitor reports their snapshot ages and
+      # shouts if any passes 10.5 days. If that fires persistently, the first dial
+      # is per-niche hot coverage, then SNAPSHOT_ROTATION_LIMIT.
       #
-      # TOTAL ~15,500 calls/day, up from 3,000 before this change. Credits ran
-      # out entirely on 2026-07-19/20; watch the balance after this ships.
-      # To cut spend: lower SNAPSHOT_ROTATION_LIMIT first (keeps the membership
-      # guarantee), then STORE_TOP_N_PRODUCTS in precompute-rankings.ts (shrinks
-      # the cache, and so the guarantee, at source). SNAPSHOT_CACHE_MEMBERSHIP=0
-      # disables the guarantee outright — emergency lever only.
+      # Credits ran out entirely on 2026-07-19/20; the run now exits non-zero on
+      # any 402, so a repeat shows red instead of green.
       - name: Run daily refresh pipeline
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}

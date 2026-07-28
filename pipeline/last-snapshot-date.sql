@@ -38,18 +38,25 @@ create index if not exists idx_products_snapshot_rotation
   on products (last_snapshot_date nulls first, product_id)
   where sold_count > 0 and price_unavailable is not true;
 
--- 4. Membership guarantee source. Every product currently served from
---    rankings_cache must be in Phase 3's hot tier — these are the rows users
---    actually page through, so a stale one is visibly stale in the UI and can
---    never refresh its delta. Extracting the ids in SQL keeps the pipeline from
---    pulling ~180 MB of payload JSON on every run just to read the ids back out.
+-- 4. Membership MONITOR source. Every product currently served from
+--    rankings_cache, with its snapshot cursor, so the pipeline can check at end
+--    of run how stale the served set has become.
+--
+--    These products are NOT fetched as their own tier. The rotation cycle
+--    already keeps them inside valid delta spans: MAX_SPAN_RATIO=1.5 in
+--    api/top-products.ts accepts a baseline->latest span of
+--    periodDays/1.5 .. periodDays*1.5, so the tightest (7-day) window accepts
+--    4.7-10.5 days, and a ~7.5-day rotation sits inside that band for every
+--    timeframe. Fetching all ~10.7k members daily would buy same-day freshness
+--    that only the head of the ranking needs — and the head is already the hot
+--    tier — at roughly 5x the credits.
 --
 --    Covers both products:* and videos:* payloads (both carry a top-level
 --    product_id). Joins to products and drops price_unavailable rows: those
---    404ed upstream, so re-fetching them burns a credit per run forever.
+--    404ed upstream, and step 6 stops them being ranked at all.
 --    Measured 2026-07-27: 10,738 distinct members, 45 of them already dead.
 create or replace view rankings_cache_members as
-select distinct p.product_id
+select distinct p.product_id, p.last_snapshot_date
 from rankings_cache rc
 cross join lateral jsonb_array_elements(rc.payload) as elem
 join products p

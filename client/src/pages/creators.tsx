@@ -122,17 +122,16 @@ function CreatorIdentity({ c }: { c: Creator }) {
   const name = c.display_name || c.handle || c.creator_key;
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      {c.avatar_url ? (
-        <img
-          src={c.avatar_url}
-          alt=""
-          loading="lazy"
-          className="h-8 w-8 rounded-full object-cover bg-secondary flex-shrink-0"
-          onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
-        />
-      ) : (
-        <div className="h-8 w-8 rounded-full bg-secondary flex-shrink-0" />
-      )}
+      {/* Through the cache-through proxy, not the raw CDN URL: TikTok avatar
+          links are signed and 403 once the signature expires (~a day), which
+          left the leaderboard full of blank circles. /api/avatar stores the
+          bytes once per creator and always renders something. */}
+      <img
+        src={`/api/avatar?key=${encodeURIComponent(c.creator_key)}`}
+        alt=""
+        loading="lazy"
+        className="h-8 w-8 rounded-full object-cover bg-secondary flex-shrink-0"
+      />
       <div className="min-w-0">
         <div className="text-sm font-medium text-foreground truncate">{name}</div>
         {/* Numeric-key creators have no handle — show the display name only

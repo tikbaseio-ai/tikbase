@@ -144,13 +144,13 @@ export function deriveCreatorKey(videoUrl: string | null): string | null {
 // product absent from the payload contributes 0 GMV, which means creators who
 // only promote unranked products score 0. Stated rather than hidden — closing it
 // needs a revenue model for the whole catalogue, not just the top 400 per niche.
-async function loadRevenue(niche: string, days: number): Promise<Map<string, RevenueEntry>> {
+async function loadRevenuePayload(cacheKey: string): Promise<Map<string, RevenueEntry>> {
+  const m = new Map<string, RevenueEntry>();
   const { data, error } = await supabase
     .from('rankings_cache')
     .select('payload')
-    .eq('cache_key', `products:${niche}:${days}`)
+    .eq('cache_key', cacheKey)
     .maybeSingle();
-  const m = new Map<string, RevenueEntry>();
   if (error || !data || !Array.isArray((data as any).payload)) return m;
   for (const p of (data as any).payload) {
     const pid = p?.product_id;
@@ -162,6 +162,44 @@ async function loadRevenue(niche: string, days: number): Promise<Map<string, Rev
     });
   }
   return m;
+}
+
+async function loadRevenue(niche: string, days: number): Promise<Map<string, RevenueEntry>> {
+  if (niche !== 'all') return loadRevenuePayload(`products:${niche}:${days}`);
+
+  // 'all' is NOT products:all:<days>. That payload is the global top 400 by
+  // revenue, which covers only a fraction of the products that are ranked
+  // somewhere: measured 2026-07-29 at 30d, products:all:30 held 400 products
+  // ($63.7M) while the union of the per-niche payloads held 5,600 ($137.4M) —
+  // 5,252 products worth $81.1M were ranked in a niche but invisible to the
+  // global payload, i.e. only 6.2% coverage.
+  //
+  // Sourcing 'all' from that payload made a creator who tops a narrow niche
+  // score real GMV on their niche board and $0 on All Categories — which is the
+  // default view, and the only view free tier gets. Union the per-niche
+  // payloads instead so 'all' is a superset of every niche, as its name implies.
+  //
+  // Products cannot double-count: the map is keyed by product_id, and a product
+  // carries one niche_slug, so it appears in exactly one niche payload.
+  const merged = new Map<string, RevenueEntry>();
+  for (const n of NICHE_SLUGS) {
+    if (n === 'all') continue;
+    const m = await loadRevenuePayload(`products:${n}:${days}`);
+    for (const [pid, entry] of m) {
+      // Keep the higher revenue if a product somehow appears twice, so the
+      // union can never under-report relative to any single niche.
+      const prev = merged.get(pid);
+      if (!prev || entry.estRevenue > prev.estRevenue) merged.set(pid, entry);
+    }
+  }
+  // Fold in the global payload too: it can contain a product whose niche
+  // payload was missing or failed to compute.
+  const globalPayload = await loadRevenuePayload(`products:all:${days}`);
+  for (const [pid, entry] of globalPayload) {
+    const prev = merged.get(pid);
+    if (!prev || entry.estRevenue > prev.estRevenue) merged.set(pid, entry);
+  }
+  return merged;
 }
 
 interface CreatorAgg {

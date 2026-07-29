@@ -70,3 +70,16 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx pipeline/precompute-rankings.ts
+
+      # Creator leaderboard aggregates. MUST run after precompute-rankings: it
+      # sources per-product revenue from the rankings_cache payloads that step
+      # writes, so running it first would attribute GMV from yesterday's numbers.
+      # Supabase-only — no ScrapeCreators credits. Measured ~3.5 min on prod
+      # (~205s to load 196k video rows + 45k products, then ~1s per niche/window).
+      # Exits non-zero if migrations/manual/2026-07-28-creators.sql has not been
+      # applied, rather than writing a partial leaderboard.
+      - name: Precompute creator leaderboard
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx pipeline/precompute-creators.ts

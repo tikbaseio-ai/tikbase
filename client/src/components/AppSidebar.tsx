@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'wouter';
-import { LayoutDashboard, Play, Package, Bookmark, CreditCard, Receipt, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Play, Package, Trophy, Bookmark, CreditCard, Receipt, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
 const NAV_ITEMS = [
   { path: '/dashboard/overview', label: 'Overview', icon: LayoutDashboard },
   { path: '/dashboard', label: 'Videos', icon: Play },
   { path: '/dashboard/products', label: 'Products', icon: Package },
+  { path: '/dashboard/creators', label: 'Top Affiliates', icon: Trophy },
   { path: '/dashboard/saved', label: 'Saved', icon: Bookmark },
 ];
 

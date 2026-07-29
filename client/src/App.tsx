@@ -11,6 +11,7 @@ import { PaywallModal } from "@/components/PaywallModal";
 import AppSidebar from "@/components/AppSidebar";
 import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
+import CreatorsPage from "@/pages/creators";
 import ProductsPage from "@/pages/products";
 import SavedPage from "@/pages/saved";
 import PlansPage from "@/pages/plans";
@@ -38,6 +39,7 @@ function DashboardLayout() {
           <Route path="/dashboard" component={() => <ProtectedRoute component={VideosPage} />} />
           <Route path="/dashboard/overview" component={() => <ProtectedRoute component={OverviewPage} />} />
           <Route path="/dashboard/products" component={() => <ProtectedRoute component={ProductsPage} />} />
+          <Route path="/dashboard/creators" component={() => <ProtectedRoute component={CreatorsPage} />} />
           <Route path="/dashboard/saved" component={() => <ProtectedRoute component={SavedPage} />} />
           <Route path="/dashboard/plans" component={() => <ProtectedRoute component={PlansPage} />} />
           <Route path="/dashboard/billing" component={() => <ProtectedRoute component={BillingPage} />} />

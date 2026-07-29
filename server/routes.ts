@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import topProductsHandler from "../api/top-products";
 import topVideosHandler from "../api/top-videos";
+import topCreatorsHandler from "../api/top-creators";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -283,6 +284,20 @@ export async function registerRoutes(
       console.error("top-products (proxy) error:", err?.message);
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to fetch products" });
+      }
+    }
+  });
+
+  // ---- Top creators (affiliate leaderboard) ----
+  // Same proxy pattern as top-products: dev (Express) and prod (Vercel) share
+  // one implementation so tier gating and the 503 shape can never drift.
+  app.get("/api/top-creators", async (req, res) => {
+    try {
+      await topCreatorsHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("top-creators (proxy) error:", err?.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to fetch creators" });
       }
     }
   });

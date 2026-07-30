@@ -18,6 +18,8 @@
  * Requires migrations/manual/2026-07-28-creators.sql to have been applied.
  */
 import { createClient } from '@supabase/supabase-js';
+import { deriveCreatorKey } from '../shared/creator-key';
+import { warmAvatars, formatWarmStats, WARM_TOP_N_PER_PAYLOAD } from './warm-avatars';
 
 const NICHE_SLUGS = [
   'all', 'beauty-skincare', 'gym-fitness', 'health-wellness', 'mens-wear',
@@ -124,20 +126,10 @@ async function pageAll<T>(
   return out;
 }
 
-// Derive creator_key from a video URL. MUST stay identical to the backfill
-// expression in migrations/manual/2026-07-28-creators.sql — this is the same
-// rule expressed twice, and a divergence would silently split every creator.
-//
-// 'user' is phase 1's placeholder for a missing unique_id, not an identity, so
-// it yields null rather than collapsing those videos into one fake creator.
-const URL_HANDLE = /tiktok\.com\/@([^/?#]+)\/video\//i;
-export function deriveCreatorKey(videoUrl: string | null): string | null {
-  const m = URL_HANDLE.exec(videoUrl || '');
-  if (!m) return null;
-  const h = m[1];
-  if (h === 'user') return null;
-  return /^[0-9]{6,}$/.test(h) ? `id:${h}` : h.toLowerCase();
-}
+// Re-exported for the existing callers of this module. The definition moved to
+// shared/creator-key.ts once the avatar warmer needed the same rule — see the
+// docblock there for why it must exist exactly once.
+export { deriveCreatorKey };
 
 // Per-product revenue for a window, sourced from the rankings_cache payload that
 // precompute-rankings.ts already wrote. v1 covers RANKED products only: a
@@ -493,6 +485,8 @@ async function main() {
 
   let ok = 0;
   let fail = 0;
+  // Creators that will actually render, collected as each payload is stored.
+  const warmTargets = new Set<string>();
   for (const days of windows) {
     for (const niche of NICHE_SLUGS) {
       const t = Date.now();
@@ -513,6 +507,9 @@ async function main() {
         );
         if (error) throw new Error(error.message);
         ok++;
+        for (const c of payload.slice(0, WARM_TOP_N_PER_PAYLOAD)) {
+          if (c?.creator_key) warmTargets.add(c.creator_key);
+        }
         console.log(
           `  ✓ creators:${niche}:${days} — ${ranked.length} creators ` +
           `(stored ${payload.length}) in ${((Date.now() - t) / 1000).toFixed(1)}s`,
@@ -523,6 +520,15 @@ async function main() {
       }
     }
   }
+
+  // Warm the avatar cache for the creators that just landed in a payload. This
+  // is the only moment their signed CDN URLs are known-fresh — by tomorrow the
+  // signatures have lapsed and the bytes are unreachable, so a request-time
+  // fetch can only ever serve a placeholder. Costs no ScrapeCreators credits
+  // (plain CDN image GETs) and never fails the run.
+  console.log(`\nWarming avatar cache for ${warmTargets.size} rendered creators...`);
+  const warm = await warmAvatars(supabase, [...warmTargets]);
+  console.log(`  ${formatWarmStats(warm)}`);
 
   console.log(
     `\nCreator precompute done: ${ok} ok, ${fail} failed in ` +

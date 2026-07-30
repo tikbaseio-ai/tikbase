@@ -13,13 +13,23 @@
 // Keyed on creator_key rather than the URL because the key is stable while the
 // signed URL rotates — caching by URL would store a new copy on every refresh.
 //
+// The storage layout and the write itself live in shared/avatar-cache.ts,
+// shared with pipeline/warm-avatars.ts: the warmer caches these same objects
+// nightly while the signed URLs are still fresh, which is the only moment the
+// fetch can succeed. If the two derived different paths, warming would cache
+// bytes this endpoint could never find.
+//
 // Usage: <img src="/api/avatar?key=<creator_key>">
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-
-const BUCKET = 'thumbnails'; // reuse the existing bucket; distinct path prefix
-const IMG_TIMEOUT_MS = 8000;
+import {
+  AVATAR_BUCKET,
+  AVATAR_PREFIX,
+  avatarPublicUrl,
+  avatarStorageName,
+  cacheAvatar,
+} from '../shared/avatar-cache';
 
 function admin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -41,22 +51,6 @@ function sendPlaceholder(res: VercelResponse) {
   res.status(200).send(svg);
 }
 
-async function fetchWithTimeout(url: string, ms: number) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// creator_key is 'lower(handle)' or 'id:<digits>'. Flatten to a filesystem-safe
-// name; the charset is already constrained by the migration's derivation.
-function storageName(creatorKey: string): string {
-  return creatorKey.replace(/[^a-z0-9_.-]/gi, '_').slice(0, 120);
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = String(req.query.key || '');
   if (!key || key.length > 128) return sendPlaceholder(res);
@@ -68,9 +62,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return sendPlaceholder(res);
   }
 
-  const name = `${storageName(key)}.jpg`;
-  const path = `avatars/${name}`;
-  const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  const name = avatarStorageName(key);
+  const publicUrl = avatarPublicUrl(supabase, key);
 
   const redirectTo = (target: string, source: string, longCache: boolean) => {
     res.setHeader('X-Avatar-Source', source);
@@ -84,11 +77,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(302).end();
   };
 
-  // 1. Storage hit?
+  // 1. Storage hit? Single-key lookup — the cheap shape for one request.
   try {
     const { data: list } = await supabase.storage
-      .from(BUCKET)
-      .list('avatars', { limit: 1, search: name });
+      .from(AVATAR_BUCKET)
+      .list(AVATAR_PREFIX, { limit: 1, search: name });
     if (list && list.some((f) => f.name === name)) {
       return redirectTo(publicUrl, 'storage', true);
     }
@@ -97,6 +90,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // 2. Miss -> resolve the current signed URL from creators, fetch, store.
+  //    Expect this to fail for creators whose avatar_url has already lapsed;
+  //    the nightly warmer is what catches them while the URL is still fresh.
   try {
     const { data: row, error } = await supabase
       .from('creators')
@@ -106,21 +101,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const src = (row as any)?.avatar_url as string | undefined;
     if (error || !src) return sendPlaceholder(res);
 
-    const img = await fetchWithTimeout(src, IMG_TIMEOUT_MS);
-    if (!img.ok) return sendPlaceholder(res);
-    const buf = Buffer.from(await img.arrayBuffer());
-    const contentType = img.headers.get('content-type') || 'image/jpeg';
-
-    const { error: upErr } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, buf, { contentType, upsert: true, cacheControl: '31536000' });
-
-    if (upErr) {
+    const result = await cacheAvatar(supabase, key, src);
+    if (result.outcome === 'stored') return redirectTo(result.publicUrl, 'origin', true);
+    if (result.outcome === 'upload-failed') {
       // Couldn't store it, but the signed URL is fresh right now — use it
       // directly with a short cache, since it will expire.
       return redirectTo(src, 'origin-nostore', false);
     }
-    return redirectTo(publicUrl, 'origin', true);
+    return sendPlaceholder(res);
   } catch {
     return sendPlaceholder(res);
   }

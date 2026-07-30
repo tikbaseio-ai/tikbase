@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import topProductsHandler from "../api/top-products";
 import topVideosHandler from "../api/top-videos";
 import topCreatorsHandler from "../api/top-creators";
+import avatarHandler from "../api/avatar";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -285,6 +286,16 @@ export async function registerRoutes(
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to fetch products" });
       }
+    }
+  });
+
+  // ---- Creator avatar proxy ----
+  app.get("/api/avatar", async (req, res) => {
+    try {
+      await avatarHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("avatar (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(302).setHeader("Location", "/favicon.ico");
     }
   });
 

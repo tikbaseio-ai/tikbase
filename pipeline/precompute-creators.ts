@@ -18,6 +18,8 @@
  * Requires migrations/manual/2026-07-28-creators.sql to have been applied.
  */
 import { createClient } from '@supabase/supabase-js';
+import { deriveCreatorKey } from '../shared/creator-key';
+import { warmAvatars, formatWarmStats, WARM_TOP_N_PER_PAYLOAD } from './warm-avatars';
 
 const NICHE_SLUGS = [
   'all', 'beauty-skincare', 'gym-fitness', 'health-wellness', 'mens-wear',
@@ -124,33 +126,23 @@ async function pageAll<T>(
   return out;
 }
 
-// Derive creator_key from a video URL. MUST stay identical to the backfill
-// expression in migrations/manual/2026-07-28-creators.sql — this is the same
-// rule expressed twice, and a divergence would silently split every creator.
-//
-// 'user' is phase 1's placeholder for a missing unique_id, not an identity, so
-// it yields null rather than collapsing those videos into one fake creator.
-const URL_HANDLE = /tiktok\.com\/@([^/?#]+)\/video\//i;
-export function deriveCreatorKey(videoUrl: string | null): string | null {
-  const m = URL_HANDLE.exec(videoUrl || '');
-  if (!m) return null;
-  const h = m[1];
-  if (h === 'user') return null;
-  return /^[0-9]{6,}$/.test(h) ? `id:${h}` : h.toLowerCase();
-}
+// Re-exported for the existing callers of this module. The definition moved to
+// shared/creator-key.ts once the avatar warmer needed the same rule — see the
+// docblock there for why it must exist exactly once.
+export { deriveCreatorKey };
 
 // Per-product revenue for a window, sourced from the rankings_cache payload that
 // precompute-rankings.ts already wrote. v1 covers RANKED products only: a
 // product absent from the payload contributes 0 GMV, which means creators who
 // only promote unranked products score 0. Stated rather than hidden — closing it
 // needs a revenue model for the whole catalogue, not just the top 400 per niche.
-async function loadRevenue(niche: string, days: number): Promise<Map<string, RevenueEntry>> {
+async function loadRevenuePayload(cacheKey: string): Promise<Map<string, RevenueEntry>> {
+  const m = new Map<string, RevenueEntry>();
   const { data, error } = await supabase
     .from('rankings_cache')
     .select('payload')
-    .eq('cache_key', `products:${niche}:${days}`)
+    .eq('cache_key', cacheKey)
     .maybeSingle();
-  const m = new Map<string, RevenueEntry>();
   if (error || !data || !Array.isArray((data as any).payload)) return m;
   for (const p of (data as any).payload) {
     const pid = p?.product_id;
@@ -162,6 +154,44 @@ async function loadRevenue(niche: string, days: number): Promise<Map<string, Rev
     });
   }
   return m;
+}
+
+async function loadRevenue(niche: string, days: number): Promise<Map<string, RevenueEntry>> {
+  if (niche !== 'all') return loadRevenuePayload(`products:${niche}:${days}`);
+
+  // 'all' is NOT products:all:<days>. That payload is the global top 400 by
+  // revenue, which covers only a fraction of the products that are ranked
+  // somewhere: measured 2026-07-29 at 30d, products:all:30 held 400 products
+  // ($63.7M) while the union of the per-niche payloads held 5,600 ($137.4M) —
+  // 5,252 products worth $81.1M were ranked in a niche but invisible to the
+  // global payload, i.e. only 6.2% coverage.
+  //
+  // Sourcing 'all' from that payload made a creator who tops a narrow niche
+  // score real GMV on their niche board and $0 on All Categories — which is the
+  // default view, and the only view free tier gets. Union the per-niche
+  // payloads instead so 'all' is a superset of every niche, as its name implies.
+  //
+  // Products cannot double-count: the map is keyed by product_id, and a product
+  // carries one niche_slug, so it appears in exactly one niche payload.
+  const merged = new Map<string, RevenueEntry>();
+  for (const n of NICHE_SLUGS) {
+    if (n === 'all') continue;
+    const m = await loadRevenuePayload(`products:${n}:${days}`);
+    for (const [pid, entry] of m) {
+      // Keep the higher revenue if a product somehow appears twice, so the
+      // union can never under-report relative to any single niche.
+      const prev = merged.get(pid);
+      if (!prev || entry.estRevenue > prev.estRevenue) merged.set(pid, entry);
+    }
+  }
+  // Fold in the global payload too: it can contain a product whose niche
+  // payload was missing or failed to compute.
+  const globalPayload = await loadRevenuePayload(`products:all:${days}`);
+  for (const [pid, entry] of globalPayload) {
+    const prev = merged.get(pid);
+    if (!prev || entry.estRevenue > prev.estRevenue) merged.set(pid, entry);
+  }
+  return merged;
 }
 
 interface CreatorAgg {
@@ -455,6 +485,8 @@ async function main() {
 
   let ok = 0;
   let fail = 0;
+  // Creators that will actually render, collected as each payload is stored.
+  const warmTargets = new Set<string>();
   for (const days of windows) {
     for (const niche of NICHE_SLUGS) {
       const t = Date.now();
@@ -475,6 +507,9 @@ async function main() {
         );
         if (error) throw new Error(error.message);
         ok++;
+        for (const c of payload.slice(0, WARM_TOP_N_PER_PAYLOAD)) {
+          if (c?.creator_key) warmTargets.add(c.creator_key);
+        }
         console.log(
           `  ✓ creators:${niche}:${days} — ${ranked.length} creators ` +
           `(stored ${payload.length}) in ${((Date.now() - t) / 1000).toFixed(1)}s`,
@@ -485,6 +520,15 @@ async function main() {
       }
     }
   }
+
+  // Warm the avatar cache for the creators that just landed in a payload. This
+  // is the only moment their signed CDN URLs are known-fresh — by tomorrow the
+  // signatures have lapsed and the bytes are unreachable, so a request-time
+  // fetch can only ever serve a placeholder. Costs no ScrapeCreators credits
+  // (plain CDN image GETs) and never fails the run.
+  console.log(`\nWarming avatar cache for ${warmTargets.size} rendered creators...`);
+  const warm = await warmAvatars(supabase, [...warmTargets]);
+  console.log(`  ${formatWarmStats(warm)}`);
 
   console.log(
     `\nCreator precompute done: ${ok} ok, ${fail} failed in ` +

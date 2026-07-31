@@ -6,6 +6,9 @@ import topProductsHandler from "../api/top-products";
 import topVideosHandler from "../api/top-videos";
 import topCreatorsHandler from "../api/top-creators";
 import avatarHandler from "../api/avatar";
+import thumbHandler from "../api/thumb";
+import creatorSearchHandler from "../api/creator-search";
+import creatorProfileHandler from "../api/creator-profile";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -310,6 +313,41 @@ export async function registerRoutes(
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to fetch creators" });
       }
+    }
+  });
+
+  // ---- Video thumbnail proxy ----
+  // Existed as a Vercel function but was never registered here, so every
+  // /api/thumb in dev fell through to the Vite catch-all and returned
+  // index.html — which is why thumbnails render broken locally and the
+  // leaderboard's product images sit behind an onError hide. Same proxy
+  // pattern as the others: one implementation, both runtimes.
+  app.get("/api/thumb", async (req, res) => {
+    try {
+      await thumbHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("thumb (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(302).setHeader("Location", "/favicon.ico");
+    }
+  });
+
+  // ---- Creator search (type-ahead) ----
+  app.get("/api/creator-search", async (req, res) => {
+    try {
+      await creatorSearchHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("creator-search (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // ---- Creator profile ----
+  app.get("/api/creator-profile", async (req, res) => {
+    try {
+      await creatorProfileHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("creator-profile (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load creator" });
     }
   });
 

@@ -521,6 +521,18 @@ async function main() {
     }
   }
 
+  // Refresh the denormalised per-creator counts that creator search ranks by.
+  // Set-based UPDATE inside the database (refresh_creator_counts) — doing it as
+  // 110k client-side updates is what made the creator_key backfill take 29
+  // minutes. Non-fatal: stale counts mis-rank search slightly, which is not
+  // worth failing a leaderboard run over.
+  const { data: counted, error: countErr } = await supabase.rpc('refresh_creator_counts');
+  if (countErr) {
+    console.warn(`  [WARN] refresh_creator_counts failed: ${countErr.message}`);
+  } else {
+    console.log(`  creator counts refreshed: ${counted ?? 0} rows changed`);
+  }
+
   // Warm the avatar cache for the creators that just landed in a payload. This
   // is the only moment their signed CDN URLs are known-fresh — by tomorrow the
   // signatures have lapsed and the bytes are unreachable, so a request-time

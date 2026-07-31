@@ -12,6 +12,7 @@ import AppSidebar from "@/components/AppSidebar";
 import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
 import CreatorsPage from "@/pages/creators";
+import CreatorProfilePage from "@/pages/creator-profile";
 import ProductsPage from "@/pages/products";
 import SavedPage from "@/pages/saved";
 import PlansPage from "@/pages/plans";
@@ -40,6 +41,9 @@ function DashboardLayout() {
           <Route path="/dashboard/overview" component={() => <ProtectedRoute component={OverviewPage} />} />
           <Route path="/dashboard/products" component={() => <ProtectedRoute component={ProductsPage} />} />
           <Route path="/dashboard/creators" component={() => <ProtectedRoute component={CreatorsPage} />} />
+          {/* Before nothing else — :key is URL-encoded ('id%3A<digits>' for the
+              numeric half of the creator universe). */}
+          <Route path="/dashboard/creator/:key" component={() => <ProtectedRoute component={CreatorProfilePage} />} />
           <Route path="/dashboard/saved" component={() => <ProtectedRoute component={SavedPage} />} />
           <Route path="/dashboard/plans" component={() => <ProtectedRoute component={PlansPage} />} />
           <Route path="/dashboard/billing" component={() => <ProtectedRoute component={BillingPage} />} />
@@ -72,7 +76,11 @@ function AppRouter() {
       <Route path="/login" component={() => <PublicRoute component={LoginPage} />} />
       <Route path="/signup" component={() => <PublicRoute component={SignupPage} />} />
       <Route path="/subscription-success" component={SubscriptionSuccessPage} />
-      <Route path="/dashboard/:rest*" component={DashboardLayout} />
+      {/* '/dashboard/*', not '/dashboard/:rest*': the named-param form matches a
+          SINGLE trailing segment, which was invisible while every dashboard page
+          was exactly two segments deep. /dashboard/creator/:key is the first
+          three-segment route and fell through to the 404 without this. */}
+      <Route path="/dashboard/*" component={DashboardLayout} />
       <Route path="/dashboard" component={DashboardLayout} />
       <Route component={NotFound} />
     </Switch>

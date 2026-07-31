@@ -1,6 +1,8 @@
 import { useState, useEffect, Fragment } from 'react';
+import { Link } from 'wouter';
 import { NICHES, formatViews, authHeader } from '@/lib/supabase';
 import { InfoTip } from '@/components/InfoTip';
+import CreatorSearch, { creatorProfilePath } from '@/components/CreatorSearch';
 import { useSubscription } from '@/hooks/use-subscription';
 import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
@@ -133,7 +135,17 @@ function CreatorIdentity({ c }: { c: Creator }) {
         className="h-8 w-8 rounded-full object-cover bg-secondary flex-shrink-0"
       />
       <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground truncate">{name}</div>
+        {/* stopPropagation: the row's own click toggles the inline product
+            panel, and a click on the name must navigate instead of doing both.
+            Numeric-key creators get a profile too — the key is the identity. */}
+        <Link
+          href={creatorProfilePath(c.creator_key)}
+          onClick={e => e.stopPropagation()}
+          className="text-sm font-medium text-foreground truncate hover:text-[#a3ff00] transition-colors block"
+          data-testid={`creator-link-${c.creator_key}`}
+        >
+          {name}
+        </Link>
         {/* Numeric-key creators have no handle — show the display name only
             rather than inventing an @id: label. */}
         {c.handle && (
@@ -205,6 +217,12 @@ export default function CreatorsPage() {
       <p className="text-xs text-muted-foreground mb-4">
         Ranked by estimated sales influence across TikTok Shop products.
       </p>
+
+      {/* Search reaches the whole 110k-creator universe, not just the ranked
+          board below — every tier can search, which is the point of it. */}
+      <div className="mb-4">
+        <CreatorSearch />
+      </div>
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-4">

@@ -22,10 +22,8 @@
  * URL SOURCING. `creators.avatar_url` is copied in at aggregation time and is
  * usually already stale, so this does not trust it as the only source. The
  * freshest signed URL for a creator is whatever the most recently inserted
- * `product_videos` row carries, so a bounded scan of recent rows wins over the
- * aggregate. Those new rows also tend to have `creator_key` still null (the
- * migration backfilled once and nothing repopulates it), which is why keys are
- * derived here rather than filtered on.
+ * `product_videos` row carries, so those rows win over the aggregate and the
+ * aggregate is only a fallback.
  *
  * Usage (standalone, e.g. to warm today's leaderboard without waiting a night):
  *   tsx --env-file=.env pipeline/warm-avatars.ts             # warm top 50/payload
@@ -40,7 +38,6 @@ import {
   listCachedAvatars,
   signedUrlExpiryMs,
 } from '../shared/avatar-cache';
-import { deriveCreatorKey } from '../shared/creator-key';
 
 /** How deep into each niche x window payload to warm. The page shows 50/page. */
 export const WARM_TOP_N_PER_PAYLOAD = 50;
@@ -49,6 +46,8 @@ const CONCURRENCY = 8;
 /** Re-fetch an avatar at most this often; faces change rarely. */
 const RECACHE_AFTER_DAYS = 7;
 const PAGE = 1000;
+/** creator_keys per `in (...)` filter — keeps the request URL a sane length. */
+const KEY_CHUNK = 200;
 /** Hard ceiling on fetches per run, so a bad day cannot balloon into a spend. */
 const MAX_FETCHES = 1200;
 
@@ -83,23 +82,17 @@ async function runPool<T>(
 /**
  * Freshest still-valid signed avatar URL per wanted creator, from product_videos.
  *
- * One full keyset pass over the table on `id`, deciding liveness in memory. That
- * is deliberate, and the cheaper-looking shapes were measured and rejected:
+ * A targeted read of just the render set's rows, served by
+ * idx_product_videos_creator_key. This is only possible because creator_key is
+ * now stamped at insert time by every write path (shared/creator-key.js) and the
+ * pre-existing gap was backfilled by pipeline/backfill-creator-keys.js. Before
+ * that, the rows carrying live signatures were exactly the unkeyed ones, and
+ * finding them meant a full 346k-row pass — ~9 minutes — because `creator_key is
+ * null` is not index-served (the index is partial on the not-null rows) and
+ * created_at is unindexed, so ordering by it cancels on statement timeout.
  *
- *   - Filtering/ordering on created_at cancels on statement timeout — the column
- *     is unindexed, and `id` is a random uuid, so it carries no recency either.
- *   - `where creator_key is null` — which is precisely where the fresh rows are,
- *     since the migration backfilled the column once and nothing repopulates it
- *     — is not index-served (the index is partial ON the not-null rows) and also
- *     times out, ~13k rows in.
- *   - Reading only the wanted creators' keyed rows IS index-served and fast, but
- *     it misses the rows inserted by the run this warmer is attached to, which
- *     are exactly the ones whose signatures are still valid. Yesterday's keyed
- *     rows have already lapsed by the time the nightly job reaches this step.
- *
- * So the full pass is what actually finds live URLs. Measured on prod
- * 2026-07-30: 346,174 rows in ~9 min. Populating creator_key on insert (or a
- * partial index on the null rows) would make this a targeted read instead.
+ * Pagination stays on `id` within each chunk: `id` is a random uuid, so it
+ * carries no recency, but it is the PK and therefore a stable cursor.
  */
 async function loadFreshUrls(
   supabase: SupabaseClient,
@@ -107,43 +100,47 @@ async function loadFreshUrls(
   now: number,
 ): Promise<Map<string, string>> {
   const best = new Map<string, { url: string; exp: number }>();
-  let last = '';
+  const keys = [...wanted];
   let scanned = 0;
 
-  for (;;) {
-    let q = supabase
-      .from('product_videos')
-      .select('id,creator_key,video_url,author_avatar_url')
-      .not('author_avatar_url', 'is', null)
-      .order('id', { ascending: true })
-      .limit(PAGE);
-    if (last) q = q.gt('id', last);
-    const { data, error } = await q;
-    if (error) {
-      // Partial results are still useful: warm what we found and move on.
-      console.warn(`  [warm] fresh-url scan stopped early: ${error.message}`);
-      break;
-    }
-    if (!data || data.length === 0) break;
-    scanned += data.length;
+  for (let i = 0; i < keys.length; i += KEY_CHUNK) {
+    const chunk = keys.slice(i, i + KEY_CHUNK);
+    let last = '';
+    for (;;) {
+      let q = supabase
+        .from('product_videos')
+        .select('id,creator_key,author_avatar_url')
+        .in('creator_key', chunk)
+        .not('author_avatar_url', 'is', null)
+        .order('id', { ascending: true })
+        .limit(PAGE);
+      if (last) q = q.gt('id', last);
+      const { data, error } = await q;
+      if (error) {
+        // Partial results are still useful: warm what we found and move on.
+        console.warn(`  [warm] fresh-url read stopped early: ${error.message}`);
+        break;
+      }
+      if (!data || data.length === 0) break;
+      scanned += data.length;
 
-    for (const r of data as any[]) {
-      const key = r.creator_key || deriveCreatorKey(r.video_url);
-      if (!key || !wanted.has(key)) continue;
-      const url = r.author_avatar_url as string;
-      if (!isSignedUrlLive(url, now)) continue;
-      // Furthest expiry wins. An unsigned URL has nothing to compare, so treat it
-      // as barely-live: any real signature outranks it.
-      const exp = signedUrlExpiryMs(url) ?? now + 1;
-      const prev = best.get(key);
-      if (!prev || exp > prev.exp) best.set(key, { url, exp });
-    }
+      for (const r of data as any[]) {
+        const key = r.creator_key as string;
+        const url = r.author_avatar_url as string;
+        if (!key || !isSignedUrlLive(url, now)) continue;
+        // Furthest expiry wins. An unsigned URL has nothing to compare, so treat
+        // it as barely-live: any real signature outranks it.
+        const exp = signedUrlExpiryMs(url) ?? now + 1;
+        const prev = best.get(key);
+        if (!prev || exp > prev.exp) best.set(key, { url, exp });
+      }
 
-    last = (data[data.length - 1] as any).id;
-    if (data.length < PAGE) break;
+      last = (data[data.length - 1] as any).id;
+      if (data.length < PAGE) break;
+    }
   }
 
-  console.log(`  [warm] scanned ${scanned} video rows, ${best.size} targets have a live url`);
+  console.log(`  [warm] read ${scanned} video rows, ${best.size} targets have a live url`);
   const out = new Map<string, string>();
   for (const [k, v] of best) out.set(k, v.url);
   return out;
@@ -176,7 +173,16 @@ export async function warmAvatars(
 
   try {
     const now = Date.now();
-    const cached = await listCachedAvatars(supabase);
+    const listing = await listCachedAvatars(supabase);
+    if (!listing.complete) {
+      // Say so out loud: an incomplete listing makes already-cached avatars look
+      // uncached, and the run below will re-fetch bytes it already has.
+      console.warn(
+        `  [warm] storage listing incomplete (${listing.error}); ` +
+        `treating ${listing.files.size} known objects as the full set`,
+      );
+    }
+    const cached = listing.files;
     const freshCutoff = now - RECACHE_AFTER_DAYS * 86400000;
 
     const needed: string[] = [];

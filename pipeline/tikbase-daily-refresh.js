@@ -14,6 +14,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { deriveCreatorKey } from "../shared/creator-key.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -726,6 +727,12 @@ async function phase1() {
               product_id: String(productId),
               video_id: videoId,
               video_url: videoUrl,
+              // Stamped at insert time. The migration backfilled this column
+              // once and installed no trigger, so a row inserted without it
+              // stays unkeyed forever — and precompute-creators drops unkeyed
+              // rows, which quietly starved the creator leaderboard of every
+              // video discovered after 2026-07-28.
+              creator_key: deriveCreatorKey(videoUrl),
               view_count: viewCount,
               author_name:
                 video?.author?.nickname ||
@@ -1017,6 +1024,7 @@ async function upsertRelatedVideos(relatedByProduct) {
         product_id: String(productId),
         video_id: videoId, // explicit — column is plain (backfilled), unique (product_id, video_id)
         video_url: url,
+        creator_key: deriveCreatorKey(url), // see the phase-1 insert for why
         view_count: toIntOrNull(e?.play_count),
         like_count: toIntOrNull(e?.like_count),
         author_name: e?.author_name || null,

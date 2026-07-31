@@ -5,7 +5,7 @@
 // Caches results for 1 hour. Returns paginated, pre-sorted results.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 interface CachedResult {
   products: any[];
@@ -14,6 +14,11 @@ interface CachedResult {
 
 const cache = new Map<string, CachedResult>();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+// How deep the opportunity thresholds are derived from. Matches
+// STORE_TOP_N_PRODUCTS in pipeline/precompute-rankings.ts — the rows that
+// actually reach a payload — so the cached and live-computed paths agree.
+export const OPPORTUNITY_POOL = 400;
 
 function getVideoPostDate(videoUrl: string): Date | null {
   const match = videoUrl?.match(/video\/(\d+)/);
@@ -283,6 +288,154 @@ function getAdminClient() {
   });
 }
 
+// ---- Per-window creator metrics -----------------------------------------
+//
+// One set-based aggregate over product_videos per WINDOW (product_window_stats,
+// see migrations/manual/2026-07-30-product-window-stats.sql), memoised here so
+// the 15-niche loop in precompute-rankings reuses a single query instead of
+// re-running it 15 times. Measured ~9s per window, so a full 6-window run adds
+// about a minute to an ~85-minute job.
+
+export interface WindowStat {
+  distinctCreators: number;
+  windowVideos: number;
+  commissionedVideos: number;
+}
+
+const windowStatsCache = new Map<number, { stats: Map<string, WindowStat>; timestamp: number }>();
+
+// Products per RPC call. Sized empirically: at 2000 the widest window (365d)
+// still lost a chunk to the statement timeout, so it is 500 — every chunk then
+// completes, at the cost of more round trips. See the migration for the
+// whole-window costs that make chunking mandatory rather than optional.
+const WINDOW_STATS_CHUNK = 500;
+
+/**
+ * Every product id, keyset-paginated and memoised across windows.
+ *
+ * Keyset because PostgREST caps a response at 1000 rows regardless of .limit()
+ * — a naive single read silently sees 1/47th of the catalogue. Memoised because
+ * the six windows would otherwise each re-walk the same 48 pages.
+ */
+let productIdsMemo: { ids: string[]; timestamp: number } | null = null;
+
+async function loadAllProductIds(supabase: SupabaseClient): Promise<string[]> {
+  if (productIdsMemo && Date.now() - productIdsMemo.timestamp < CACHE_TTL) {
+    return productIdsMemo.ids;
+  }
+  const ids: string[] = [];
+  let last = '';
+  for (;;) {
+    let q = supabase
+      .from('products')
+      .select('product_id')
+      .order('product_id', { ascending: true })
+      .limit(1000);
+    if (last) q = q.gt('product_id', last);
+    const { data, error } = await q;
+    if (error) {
+      console.warn(`  [WARN] product id scan failed: ${error.message}`);
+      return ids;
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data as any[]) ids.push(String(r.product_id));
+    last = ids[ids.length - 1];
+    if (data.length < 1000) break;
+  }
+  productIdsMemo = { ids, timestamp: Date.now() };
+  return ids;
+}
+
+export async function loadWindowStats(days: number): Promise<Map<string, WindowStat>> {
+  const cached = windowStatsCache.get(days);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) return cached.stats;
+
+  const supabase = getAdminClient();
+  const stats = new Map<string, WindowStat>();
+
+  const ids = await loadAllProductIds(supabase);
+  if (ids.length === 0) return stats;
+
+  for (let i = 0; i < ids.length; i += WINDOW_STATS_CHUNK) {
+    const chunk = ids.slice(i, i + WINDOW_STATS_CHUNK);
+    const { data, error } = await supabase.rpc('product_window_stats', {
+      p_days: days,
+      p_product_ids: chunk,
+    });
+    if (error) {
+      // Non-fatal: the ranking is still correct without the creator columns, and
+      // failing a whole precompute over an enrichment would be a bad trade. The
+      // affected products report null and the UI renders an em dash.
+      console.warn(
+        `  [WARN] product_window_stats(${days}) chunk ${i / WINDOW_STATS_CHUNK} failed: ${error.message}`,
+      );
+      continue;
+    }
+    for (const r of (data as any[]) || []) {
+      stats.set(String(r.product_id), {
+        distinctCreators: Number(r.distinct_creators) || 0,
+        windowVideos: Number(r.window_videos) || 0,
+        commissionedVideos: Number(r.commissioned_videos) || 0,
+      });
+    }
+  }
+
+  windowStatsCache.set(days, { stats, timestamp: Date.now() });
+  return stats;
+}
+
+/**
+ * Opportunity badge: proven demand, little competition.
+ *
+ *   hasRealDelta            — MEASURED sales, never a modelled estimate
+ *   AND revenue >= p75      — top quartile of this payload's window revenue
+ *   AND creators <= median  — fewer creators than half this payload
+ *
+ * The thresholds are derived from the payload being built, not hardcoded, so
+ * "top quartile" means top quartile of what the user is actually looking at.
+ * They are computed over the stored top-N rather than the full ranked list on
+ * purpose: the full list is tens of thousands of products, most with no revenue
+ * at all, which would make "top quartile" a meaningless bar.
+ *
+ * hasRealDelta is a hard gate. A badge that fires on modelled revenue would be
+ * pointing users at a number the estimator invented.
+ */
+export function annotateOpportunity(rows: any[]): {
+  revenueP75: number;
+  creatorMedian: number;
+  badged: number;
+} {
+  const revenues = rows
+    .map((r) => Number(r?.metrics?.estRevenue) || 0)
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  const creators = rows
+    .map((r) => (r?.distinct_creators == null ? null : Number(r.distinct_creators)))
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b);
+
+  const revenueP75 = revenues.length
+    ? revenues[Math.min(revenues.length - 1, Math.floor(revenues.length * 0.75))]
+    : Infinity;
+  const creatorMedian = creators.length
+    ? creators[Math.floor(creators.length / 2)]
+    : 0;
+
+  let badged = 0;
+  for (const r of rows) {
+    const rev = Number(r?.metrics?.estRevenue) || 0;
+    const dc = r?.distinct_creators;
+    const isOpp =
+      r?.metrics?.hasRealDelta === true &&
+      rev >= revenueP75 &&
+      dc != null &&
+      dc <= creatorMedian;
+    r.opportunity = isOpp;
+    if (isOpp) badged++;
+  }
+  return { revenueP75, creatorMedian, badged };
+}
+
 // Read the daily precomputed ranking (top-N enriched products) written by
 // pipeline/precompute-rankings.ts. Returns null if the table/row isn't there
 // yet, so the handler transparently falls back to live computation.
@@ -321,7 +474,7 @@ export async function computeTopProducts(
     while (true) {
       const { data } = await supabase
         .from('products')
-        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
+        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at, seller_name')
         .gt('sold_count', 0)
         .not('price_unavailable', 'is', true)
         .order('sold_count', { ascending: false })
@@ -336,7 +489,7 @@ export async function computeTopProducts(
     while (true) {
       const { data } = await supabase
         .from('products')
-        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at')
+        .select('product_id, title, niche_slug, niche_label, image_url, sale_price, sold_count, stock_quantity, product_url, created_at, seller_name')
         .eq('niche_slug', nicheSlug)
         .gt('sold_count', 0)
         .not('price_unavailable', 'is', true)
@@ -387,6 +540,9 @@ export async function computeTopProducts(
   const withPrice = products.filter((p) => p.sale_price > 0).map((p) => p.sale_price).sort((a: number, b: number) => a - b);
   const medianPrice = withPrice.length > 0 ? withPrice[Math.floor(withPrice.length / 2)] : 24.99;
 
+  // Per-window creator competition, one aggregate for the whole table.
+  const windowStats = await loadWindowStats(days);
+
   const enriched = products.map((p) => {
     const videos = videoMap[p.product_id] || [];
     const snapshots = snapMap[p.product_id] || [];
@@ -397,12 +553,40 @@ export async function computeTopProducts(
       view_count: v.view_count,
       cover_image_url: v.cover_image_url || p.image_url || null,
     }));
-    return { ...p, metrics, topVideos };
+
+    const ws = windowStats.get(String(p.product_id));
+    // A product with no videos in the window has no intensity to report. null,
+    // never 0 — "nobody posted" and "nobody was paid" are different claims, and
+    // 0% would assert the second one.
+    const affiliateIntensity =
+      ws && ws.windowVideos > 0
+        ? Math.round((ws.commissionedVideos / ws.windowVideos) * 1000) / 1000
+        : null;
+
+    return {
+      ...p,
+      metrics,
+      topVideos,
+      distinct_creators: ws?.distinctCreators ?? 0,
+      window_video_count: ws?.windowVideos ?? 0,
+      affiliate_intensity: affiliateIntensity,
+    };
   });
 
   // 4. Sort by estimated revenue (default)
   enriched.sort(
     (a: any, b: any) => (b.metrics.estRevenue || 0) - (a.metrics.estRevenue || 0),
+  );
+
+  // 5. Opportunity badge, over the slice that actually gets stored and shown —
+  //    see annotateOpportunity for why the thresholds come from the payload
+  //    rather than the full ranked list.
+  const pool = enriched.slice(0, OPPORTUNITY_POOL);
+  const thresholds = annotateOpportunity(pool);
+  for (const r of enriched.slice(OPPORTUNITY_POOL)) r.opportunity = false;
+  console.log(
+    `    opportunity ${nicheSlug}:${days} — revenue p75 $${thresholds.revenueP75.toFixed(0)}, ` +
+    `creator median ${thresholds.creatorMedian}, ${thresholds.badged}/${pool.length} badged`,
   );
 
   return enriched;
@@ -435,6 +619,73 @@ async function resolveTier(req: VercelRequest): Promise<'free' | 'paid'> {
 const FREE_NICHE = 'all';
 const FREE_DAYS = 7;
 const FREE_ROWS = 10;
+
+// Windows always shown as columns, regardless of which one is ranking.
+const COMPANION_WINDOWS = [7, 30];
+
+interface WindowRevenue {
+  revenue: number;
+  unitsSold: number;
+  hasRealDelta: boolean;
+  hasRealPrice: boolean;
+}
+
+/**
+ * Attach every companion window's revenue to each row, keyed by product_id.
+ *
+ * Reads the sibling payloads straight from rankings_cache (not a recompute):
+ * each is an instant table read and they are already in memory for the common
+ * case. The ranking window's own numbers are reused rather than re-read.
+ */
+async function withCompanionWindows(
+  nicheSlug: string,
+  rankingDays: number,
+  rows: any[],
+): Promise<any[]> {
+  const wanted = Array.from(new Set([...COMPANION_WINDOWS, rankingDays]));
+  const byWindow = new Map<number, Map<string, WindowRevenue>>();
+
+  for (const d of wanted) {
+    if (d === rankingDays) continue; // taken from `rows` below
+    let payload: any[] | null = null;
+    const sibling = cache.get(`${nicheSlug}:${d}`);
+    if (sibling && Date.now() - sibling.timestamp < CACHE_TTL) {
+      payload = sibling.products;
+    } else {
+      payload = await readPrecomputed(nicheSlug, d);
+      if (payload) cache.set(`${nicheSlug}:${d}`, { products: payload, timestamp: Date.now() });
+    }
+    if (!payload) continue; // window not precomputed yet -> stays null
+
+    const m = new Map<string, WindowRevenue>();
+    for (const p of payload) {
+      m.set(String(p.product_id), {
+        revenue: Number(p?.metrics?.estRevenue) || 0,
+        unitsSold: Number(p?.metrics?.estPeriodUnitsSold) || 0,
+        hasRealDelta: p?.metrics?.hasRealDelta === true,
+        hasRealPrice: p?.metrics?.hasRealPrice === true,
+      });
+    }
+    byWindow.set(d, m);
+  }
+
+  return rows.map((r) => {
+    const windows: Record<string, WindowRevenue | null> = {};
+    for (const d of wanted) {
+      if (d === rankingDays) {
+        windows[String(d)] = {
+          revenue: Number(r?.metrics?.estRevenue) || 0,
+          unitsSold: Number(r?.metrics?.estPeriodUnitsSold) || 0,
+          hasRealDelta: r?.metrics?.hasRealDelta === true,
+          hasRealPrice: r?.metrics?.hasRealPrice === true,
+        };
+      } else {
+        windows[String(d)] = byWindow.get(d)?.get(String(r.product_id)) ?? null;
+      }
+    }
+    return { ...r, windows };
+  });
+}
 
 export default async function handler(
   req: VercelRequest,
@@ -477,6 +728,17 @@ export default async function handler(
       cache.set(cacheKey, { products, timestamp: Date.now() });
     }
 
+    // Dual-window merge. The table shows 7d AND 30d revenue side by side
+    // whatever the ranking window is, so both payloads are read and joined on
+    // product_id here rather than making the client fire a second request and
+    // stitch it.
+    //
+    // A product ranked in one window and absent from the other keeps null for
+    // the missing side — the UI renders an em dash. Zero would claim the
+    // product sold nothing that window, which is a different and false claim:
+    // absence from a top-400 payload means "not ranked", not "no sales".
+    products = await withCompanionWindows(nicheSlug, days, products);
+
     // Re-sort if requested sort differs from default
     let sorted = products;
     if (sortBy !== 'estRevenue' || sortDir !== 'desc') {
@@ -487,7 +749,16 @@ export default async function handler(
           case 'sold_count': aVal = a.metrics.estPeriodUnitsSold; bVal = b.metrics.estPeriodUnitsSold; break;
           case 'estRevenue': aVal = a.metrics.estRevenue; bVal = b.metrics.estRevenue; break;
           case 'stock_quantity': aVal = a.stock_quantity || 0; bVal = b.stock_quantity || 0; break;
+          // Lifetime units, distinct from 'sold_count' above which is the
+          // window's estimated units.
+          case 'total_sold': aVal = a.sold_count || 0; bVal = b.sold_count || 0; break;
           case 'sale_price': aVal = a.sale_price || 0; bVal = b.sale_price || 0; break;
+          // New sortable columns. A null window sorts as -1 so "not ranked in
+          // this window" lands below a genuine $0 rather than above it.
+          case 'revenue7d': aVal = a.windows?.['7']?.revenue ?? -1; bVal = b.windows?.['7']?.revenue ?? -1; break;
+          case 'revenue30d': aVal = a.windows?.['30']?.revenue ?? -1; bVal = b.windows?.['30']?.revenue ?? -1; break;
+          case 'distinct_creators': aVal = a.distinct_creators ?? -1; bVal = b.distinct_creators ?? -1; break;
+          case 'affiliate_intensity': aVal = a.affiliate_intensity ?? -1; bVal = b.affiliate_intensity ?? -1; break;
           default: aVal = 0; bVal = 0;
         }
         return sortDir === 'desc' ? bVal - aVal : aVal - bVal;

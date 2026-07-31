@@ -15,11 +15,12 @@
  *   tsx --env-file=.env pipeline/precompute-rankings.ts            # all combos
  *   tsx --env-file=.env pipeline/precompute-rankings.ts all 7      # one combo (testing)
  *   tsx --env-file=.env pipeline/precompute-rankings.ts all        # one niche, all timeframes
+ *   tsx --env-file=.env pipeline/precompute-rankings.ts all 30 --dry-run   # READ-ONLY
  *
  * Requires the rankings_cache table (see pipeline/rankings_cache.sql).
  */
 import { createClient } from '@supabase/supabase-js';
-import { computeTopProducts } from '../api/top-products';
+import { computeTopProducts, loadWindowStats } from '../api/top-products';
 import { computeTopVideos } from '../api/top-videos';
 
 const NICHE_SLUGS = [
@@ -43,13 +44,15 @@ const supabase = createClient(url, key, {
 
 async function main() {
   // Optional CLI filters for isolated testing.
-  const argNiche = process.argv[2];
-  const argDays = process.argv[3] ? Number(process.argv[3]) : null;
+  const dryRun = process.argv.includes('--dry-run');
+  const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const argNiche = positional[0];
+  const argDays = positional[1] ? Number(positional[1]) : null;
   const niches = argNiche ? [argNiche] : NICHE_SLUGS;
   const daysList = argDays ? [argDays] : DAYS;
 
   console.log(
-    `Precomputing rankings for ${niches.length} niche(s) × ${daysList.length} timeframe(s) = ${niches.length * daysList.length} combos\n`,
+    `Precomputing rankings for ${niches.length} niche(s) × ${daysList.length} timeframe(s) = ${niches.length * daysList.length} combos${dryRun ? ' — DRY RUN, nothing written' : ''}\n`,
   );
 
   const started = Date.now();
@@ -68,6 +71,36 @@ async function main() {
     try {
       const ranked = await compute();
       const payload = ranked.slice(0, topN);
+
+      // READ-ONLY verification path: print the payload rather than storing it.
+      if (dryRun) {
+        console.log(
+          `  [dry-run] ${kind}:${niche}:${days} — ${ranked.length} rows ` +
+          `(would store ${payload.length}) in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+        );
+        if (kind === 'products') {
+          console.log(
+            '    rank  revenue        sold  creators  aff%   opp  conf   product',
+          );
+          for (const [i, p] of payload.slice(0, 10).entries()) {
+            const m = p.metrics || {};
+            const aff = p.affiliate_intensity;
+            console.log(
+              `    ${String(i + 1).padStart(4)}  ` +
+              `$${(m.estRevenue || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }).padStart(12)}  ` +
+              `${String(m.estPeriodUnitsSold ?? 0).padStart(5)}  ` +
+              `${String(p.distinct_creators ?? 0).padStart(8)}  ` +
+              `${(aff === null || aff === undefined ? '—' : `${Math.round(aff * 100)}%`).padStart(4)}  ` +
+              `${p.opportunity ? 'YES' : ' - '}  ` +
+              `${m.hasRealDelta ? 'real' : 'est '}  ` +
+              `${String(p.title ?? p.product_id).slice(0, 52)}`,
+            );
+          }
+        }
+        ok++;
+        return;
+      }
+
       const { error } = await supabase.from('rankings_cache').upsert(
         {
           cache_key: `${kind}:${niche}:${days}`,
@@ -87,6 +120,25 @@ async function main() {
       console.error(`  ✗ ${kind}:${niche}:${days} — ${e?.message || e}`);
     }
   }
+
+  // Warm the per-window creator aggregate ONCE per window, before the niche
+  // loop. computeTopProducts memoises it, so this is what keeps the addition at
+  // one query per window (~9s each, measured) instead of one per niche x window
+  // (90 queries, ~13 min). Timed explicitly so the runtime delta of the 1c/2
+  // enrichment is visible in the job log rather than inferred.
+  const warmStart = Date.now();
+  for (const days of daysList) {
+    const t = Date.now();
+    const stats = await loadWindowStats(days);
+    console.log(
+      `  window stats ${days}d — ${stats.size} products with videos in window ` +
+      `in ${((Date.now() - t) / 1000).toFixed(1)}s`,
+    );
+  }
+  const warmMs = Date.now() - warmStart;
+  console.log(
+    `  window-stats total: ${(warmMs / 1000).toFixed(1)}s for ${daysList.length} window(s)\n`,
+  );
 
   for (const niche of niches) {
     for (const days of daysList) {

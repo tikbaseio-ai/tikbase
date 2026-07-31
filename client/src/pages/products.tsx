@@ -11,15 +11,33 @@ import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
 import { InfoTip } from '@/components/InfoTip';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
-import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package } from 'lucide-react';
+import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package, Sparkles } from 'lucide-react';
 import { LoadingBar } from '@/components/LoadingBar';
+import { ConfidenceDot } from '@/components/ConfidenceDot';
+
+/** One window's revenue block, as merged server-side by /api/top-products. */
+interface WindowRevenue {
+  revenue: number;
+  unitsSold: number;
+  hasRealDelta: boolean;
+  hasRealPrice: boolean;
+}
 
 interface EnrichedProduct extends Product {
   metrics: ProductEstimates;
   topVideos: { video_url: string; view_count: number; cover_image_url: string }[];
+  // null when the product is not ranked in that window — rendered as an em
+  // dash, never $0.
+  windows?: Record<string, WindowRevenue | null>;
+  distinct_creators?: number;
+  window_video_count?: number;
+  affiliate_intensity?: number | null;
+  opportunity?: boolean;
 }
 
-type SortKey = 'periodViews' | 'sold_count' | 'estRevenue' | 'stock_quantity' | 'sale_price';
+type SortKey =
+  | 'periodViews' | 'sold_count' | 'estRevenue' | 'stock_quantity' | 'sale_price'
+  | 'revenue7d' | 'revenue30d' | 'total_sold' | 'distinct_creators';
 type SortDir = 'asc' | 'desc';
 
 // Client-side cache for product API responses
@@ -49,6 +67,43 @@ function formatRevenue(n: number): string {
   return '--';
 }
 
+// Windows that are always columns, whatever the ranking window is.
+const BASE_WINDOWS = [7, 30];
+
+/**
+ * One window's GMV cell.
+ *
+ * null window => the product is not in that window's ranked payload. That means
+ * "not ranked", NOT "sold nothing", so it renders an em dash. Printing $0 would
+ * assert a fact we do not have.
+ */
+function GmvCell({ w }: { w: WindowRevenue | null | undefined }) {
+  if (!w) {
+    return (
+      <span
+        className="text-zinc-600 text-xs font-mono"
+        title="Not ranked in this window — no figure, which is not the same as zero sales."
+      >
+        —
+      </span>
+    );
+  }
+  return (
+    <div
+      className="flex items-center justify-end gap-1.5"
+      title={
+        `${w.unitsSold.toLocaleString()} units in window` +
+        (w.hasRealPrice ? '' : ' · price estimated from category median')
+      }
+    >
+      <ConfidenceDot hasRealDelta={w.hasRealDelta} hasRealPrice={w.hasRealPrice} />
+      <span className="font-mono text-xs font-semibold text-foreground">
+        {w.revenue > 0 ? `${w.hasRealPrice ? '' : '≈'}${formatRevenue(w.revenue)}` : '—'}
+      </span>
+    </div>
+  );
+}
+
 
 
 export default function ProductsPage() {
@@ -76,6 +131,11 @@ export default function ProductsPage() {
 
   const limit = 50;
   const totalPages = Math.ceil(total / limit);
+
+  // 7d and 30d are permanent columns. Any other selected timeframe earns an
+  // extra column after 30d rather than replacing one, so switching the ranking
+  // window never hides the two windows the hierarchy is built around.
+  const extraWindow = BASE_WINDOWS.includes(timeframe.days) ? null : timeframe.days;
 
   // Free users get the real top 10 on the 1 Week window (server enforces
   // all/7d/top-10; align the UI so the active pill matches what's returned).
@@ -248,35 +308,72 @@ export default function ProductsPage() {
               <thead>
                 <tr className="border-b border-border">
                   <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground w-12">#</th>
-                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[220px]">Product</th>
-                  <SortHeader
-                    label="Period Views"
-                    sortKeyVal="periodViews"
-                    tip="Total TikTok views from videos about this product posted within your selected timeframe. This is the main ranking signal — products with fresh viral videos rank highest."
-                  />
-                  <SortHeader
-                    label="Revenue"
-                    sortKeyVal="estRevenue"
-                    tip="Estimated revenue for the period = estimated units sold × price. A ≈ means the price was estimated from the category median. Directional, not exact sales."
-                  />
-                  <SortHeader
-                    label="Units Sold"
-                    sortKeyVal="sold_count"
-                    tip="Estimated units sold during the selected period. “in period” = measured from real day-over-day sales snapshots; “estimated” = modeled from views when snapshot data isn’t available yet."
-                  />
+                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[260px]">Product</th>
                   <SortHeader
                     label="Price"
                     sortKeyVal="sale_price"
                     tip="Current listed sale price on TikTok Shop (US region)."
                   />
-                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[160px]">
-                    <div className="flex items-center gap-1">
-                      Top Videos
+                  <SortHeader
+                    label="7d GMV"
+                    sortKeyVal="revenue7d"
+                    tip={<>Revenue from units sold in the last 7 days. The dot is confidence:
+                      <span className="text-[#a3ff00]"> green</span> = measured from a real sales
+                      snapshot, <span className="text-amber-500">amber</span> = modeled from views.
+                      “—” means the product isn’t ranked in that window, which is not the same as
+                      zero sales.</>}
+                  />
+                  <SortHeader
+                    label="30d GMV"
+                    sortKeyVal="revenue30d"
+                    tip="Revenue from units sold in the last 30 days, same confidence rules as 7d."
+                  />
+                  {/* A ranking window outside 7/30 earns its own column, after
+                      30d, so the selected timeframe is never invisible. */}
+                  {extraWindow && (
+                    <SortHeader
+                      label={`${extraWindow}d GMV`}
+                      sortKeyVal="estRevenue"
+                      tip={`Revenue from units sold in the last ${extraWindow} days — the window you have selected, which is also what the ranking uses.`}
+                    />
+                  )}
+                  <SortHeader
+                    label="Total Sold"
+                    sortKeyVal="total_sold"
+                    tip="Lifetime units sold as reported by TikTok Shop — not the window figure."
+                  />
+                  <SortHeader
+                    label="In Stock"
+                    sortKeyVal="stock_quantity"
+                    tip={<>Units currently in stock, when TikTok reports them. Mostly it does not:
+                      46,195 of 47,962 products report 0, which is indistinguishable from “not
+                      reported”, so 0 renders as “—” rather than claiming the item is sold out.
+                      Treat a present number as a signal and an absent one as no information.</>}
+                  />
+                  <SortHeader
+                    label="Creators"
+                    sortKeyVal="distinct_creators"
+                    tip="Distinct creators who posted about this product inside the ranking window — at 30 days this is creators per month. Low creators against proven sales is the opportunity signal."
+                  />
+                  <th className="py-3 px-3 font-medium text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1 justify-end">
+                      Affiliate&nbsp;%
                       <InfoTip size={11}>
-                        The highest-viewed TikTok videos driving this product. Hover a thumbnail for its view count; click to open on TikTok.
+                        Share of this window’s videos carrying TikTok’s “Creator earns commission”
+                        label. It replaces commission rate, which TikTok does not populate — of
+                        47,837 products, zero carry a commission rate above zero.
+                        <span className="block mt-1">
+                          A LOWER BOUND: only 53.5% of video rows carry any ad label, and a missing
+                          label is not proof a video was unpaid. “—” means no videos in the window.
+                        </span>
                       </InfoTip>
                     </div>
                   </th>
+                  <SortHeader
+                    label="Views"
+                    sortKeyVal="periodViews"
+                    tip="TikTok views from videos posted within the ranking window. This is what the Trending mode sorts by."
+                  />
                   <th className="py-3 px-3 w-10"></th>
                 </tr>
               </thead>
@@ -305,7 +402,27 @@ export default function ProductsPage() {
                             {product.image_url && <img src={product.image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-xs font-medium text-foreground line-clamp-2 leading-snug">{product.title}</p>
+                            <div className="flex items-start gap-1.5">
+                              <p className="text-xs font-medium text-foreground line-clamp-2 leading-snug">{product.title}</p>
+                              {/* Inline with the name, because it is a property
+                                  of the product, not another metric column. */}
+                              {product.opportunity && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 flex-shrink-0 mt-px px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border border-[#a3ff00]/40 text-[#a3ff00] bg-[#a3ff00]/10"
+                                  title="Opportunity: measured sales in this window's top revenue quartile, promoted by fewer creators than the median product on this page. Proven demand, little competition."
+                                  data-testid="opportunity-badge"
+                                >
+                                  <Sparkles size={8} /> Opportunity
+                                </span>
+                              )}
+                            </div>
+                            {/* Shop name — the pro's hierarchy leads with who is
+                                selling, not just what. 77% of products carry it. */}
+                            {product.seller_name && (
+                              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                {product.seller_name}
+                              </p>
+                            )}
                             {product.product_url && (
                               <a
                                 href={isPaid ? product.product_url : undefined}
@@ -320,82 +437,80 @@ export default function ProductsPage() {
                         </div>
                       </td>
 
-                      {/* Period Views — the ranking signal */}
-                      <td className="py-3 px-3 text-right">
-                        <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this period\n' + m.totalViews.toLocaleString() + ' total views from ' + (product.topVideos || []).length + ' videos all-time'}>
-                          <span className="font-mono text-xs font-semibold text-foreground">
-                            {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (
-                              m.totalViews > 0 ? <span className="text-zinc-500">{formatCompactNumber(m.totalViews)}</span> : <span className="text-zinc-500 font-normal">--</span>
-                            )}
-                          </span>
-                          <div className="text-[9px] font-mono mt-0.5">
-                            {m.periodVideoCount > 0 
-                              ? <span className="text-zinc-500">{m.periodVideoCount} recent / {(product.topVideos || []).length} total</span>
-                              : <span className="text-zinc-500">{(product.topVideos || []).length} video{(product.topVideos || []).length !== 1 ? 's' : ''}</span>
-                            }
-                            {(product.topVideos || []).length < 5 && (product.topVideos || []).length > 0 && (
-                              <div className="text-[8px] text-amber-500/80 mt-0.5">limited data</div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Revenue */}
-                      <td className="py-3 px-3 text-right">
-                        {m.estRevenue > 0 ? (
-                          <div>
-                            <span className="font-mono text-xs font-semibold text-[#a3ff00]">
-                              {!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue)}
-                            </span>
-                            {!m.hasRealPrice && (
-                              <div className="text-[9px] text-zinc-500 font-mono mt-0.5">est. price</div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-zinc-500 text-xs">--</span>
-                        )}
-                      </td>
-
-                      {/* Units Sold */}
-                      <td className="py-3 px-3 text-right">
-                        <div>
-                          <span className="font-mono text-xs text-foreground">
-                            {m.hasRealDelta ? '' : '≈ '}{m.estPeriodUnitsSold.toLocaleString()}
-                          </span>
-                          <div className="text-[9px] text-zinc-500 font-mono mt-0.5">
-                            {m.hasRealDelta ? 'in period' : 'estimated'}
-                          </div>
-                        </div>
-                      </td>
-
-
-
                       {/* Price */}
                       <td className="py-3 px-3 text-right">
                         <span className="font-mono text-xs font-medium text-foreground">
-                          {price > 0 ? `$${price.toFixed(2)}` : '--'}
+                          {price > 0 ? `$${price.toFixed(2)}` : '—'}
                         </span>
                       </td>
 
-                      {/* Top Videos */}
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-1">
-                          {displayVideos.slice(0, 5).map(vid => (
-                            <a key={vid.video_url} href={vid.video_url} target="_blank" rel="noopener noreferrer" className="block flex-shrink-0 relative group">
-                              <div className="w-8 h-8 rounded border border-border overflow-hidden bg-zinc-800 hover:border-primary/50 transition-colors">
-                                {vid.cover_image_url ? (
-                                  <img src={vid.cover_image_url} alt="" className="w-full h-full object-cover" loading="lazy"
-                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-zinc-500 text-[10px]">▶</div>'; }} />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-zinc-500 text-[10px]">▶</div>
-                                )}
-                              </div>
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 rounded bg-black/90 text-[10px] font-mono text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                {formatViews(vid.view_count || 0)} views
-                              </div>
-                            </a>
-                          ))}
-                          {(product.topVideos || []).length === 0 && <span className="text-[10px] text-muted-foreground">--</span>}
+                      {/* 7d / 30d GMV — always both, whatever the ranking window */}
+                      <td className="py-3 px-3 text-right">
+                        <GmvCell w={product.windows?.['7']} />
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <GmvCell w={product.windows?.['30']} />
+                      </td>
+                      {extraWindow && (
+                        <td className="py-3 px-3 text-right">
+                          <GmvCell w={product.windows?.[String(extraWindow)]} />
+                        </td>
+                      )}
+
+                      {/* Total sold (lifetime) */}
+                      <td className="py-3 px-3 text-right">
+                        <span className="font-mono text-xs text-foreground">
+                          {product.sold_count > 0 ? formatCompactNumber(product.sold_count) : '—'}
+                        </span>
+                      </td>
+
+                      {/* In stock */}
+                      <td className="py-3 px-3 text-right">
+                        <span className="font-mono text-xs text-foreground">
+                          {product.stock_quantity != null && product.stock_quantity > 0
+                            ? formatCompactNumber(product.stock_quantity)
+                            : '—'}
+                        </span>
+                      </td>
+
+                      {/* Creators in window. ZERO IS A REAL VALUE here and is
+                          printed as 0, not a dash: "nobody is posting about a
+                          product that is measurably selling" is precisely the
+                          opportunity signal, and a dash would read as "unknown"
+                          and hide it. Only a missing field dashes. */}
+                      <td className="py-3 px-3 text-right">
+                        <span
+                          className="font-mono text-xs text-foreground"
+                          title={
+                            (product.window_video_count ?? 0) +
+                            ' video(s) in the ranking window from ' +
+                            (product.distinct_creators ?? 0) + ' distinct creator(s)'
+                          }
+                        >
+                          {product.distinct_creators == null
+                            ? '—'
+                            : product.distinct_creators.toLocaleString()}
+                        </span>
+                      </td>
+
+                      {/* Affiliate intensity — null (no window videos) shows a
+                          dash, never 0%, which would claim nobody was paid. */}
+                      <td className="py-3 px-3 text-right">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {product.affiliate_intensity == null
+                            ? '—'
+                            : `${Math.round(product.affiliate_intensity * 100)}%`}
+                        </span>
+                      </td>
+
+                      {/* Views — the Trending ranking signal */}
+                      <td className="py-3 px-3 text-right">
+                        <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this window\n' + m.totalViews.toLocaleString() + ' total views all-time'}>
+                          <span className="font-mono text-xs text-foreground">
+                            {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (
+                              m.totalViews > 0 ? <span className="text-zinc-500">{formatCompactNumber(m.totalViews)}</span> : <span className="text-zinc-500">—</span>
+                            )}
+                          </span>
                         </div>
                       </td>
 

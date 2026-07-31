@@ -13,6 +13,7 @@ import {
 import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
 import { useSubscription } from '@/hooks/use-subscription';
 import { LoadingBar } from '@/components/LoadingBar';
+import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { ArrowRight, Eye, ExternalLink, Package, Play } from 'lucide-react';
 
 interface EnrichedProduct extends Product {
@@ -147,9 +148,15 @@ export default function OverviewPage() {
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             {m.estRevenue > 0 ? (
-                              <span className="font-mono text-xs font-semibold text-[#a3ff00]">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue)}</span>
+                              // Same confidence marker as the products table, so
+                              // a number does not look more solid here than it
+                              // does there.
+                              <span className="inline-flex items-center justify-end gap-1.5">
+                                <ConfidenceDot hasRealDelta={m.hasRealDelta} hasRealPrice={m.hasRealPrice} />
+                                <span className="font-mono text-xs font-semibold text-[#a3ff00]">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue)}</span>
+                              </span>
                             ) : (
-                              <span className="text-zinc-500 text-xs">--</span>
+                              <span className="text-zinc-500 text-xs">—</span>
                             )}
                           </td>
                           <td className="py-2.5 px-3 text-right">

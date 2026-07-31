@@ -138,28 +138,41 @@ export async function cacheAvatar(
   return { outcome: 'stored', publicUrl, bytes: buf.byteLength, status: img.status, contentType };
 }
 
+export interface CachedAvatarListing {
+  /** storage-name -> last-modified (epoch ms). */
+  files: Map<string, number>;
+  /** False when a page failed, so `files` is a partial view, not the truth. */
+  complete: boolean;
+  error?: string;
+}
+
 /**
- * Every cached avatar, as storage-name -> last-modified. One bulk listing so a
- * batch caller can answer "is this creator already cached, and how recently?"
- * without a per-creator round trip (the proxy's single-key `search` is the right
- * shape for one request; it is the wrong shape for several hundred).
+ * Every cached avatar, as one bulk listing, so a batch caller can answer "is this
+ * creator already cached, and how recently?" without a per-creator round trip
+ * (the proxy's single-key `search` is the right shape for one request; it is the
+ * wrong shape for several hundred).
+ *
+ * `complete` matters: a failed listing looks exactly like an empty bucket, and a
+ * caller that cannot tell them apart silently re-fetches everything it already
+ * had. Observed doing precisely that on 2026-07-30.
  */
 export async function listCachedAvatars(
   supabase: SupabaseClient,
-): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+): Promise<CachedAvatarListing> {
+  const files = new Map<string, number>();
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     const { data, error } = await supabase.storage
       .from(AVATAR_BUCKET)
       .list(AVATAR_PREFIX, { limit: PAGE, offset });
-    if (error || !data || data.length === 0) break;
+    if (error) return { files, complete: false, error: error.message };
+    if (!data || data.length === 0) break;
     for (const f of data) {
       const meta = f as unknown as { updated_at?: string; created_at?: string };
       const stamp = meta.updated_at || meta.created_at;
-      out.set(f.name, stamp ? Date.parse(stamp) : 0);
+      files.set(f.name, stamp ? Date.parse(stamp) : 0);
     }
     if (data.length < PAGE) break;
   }
-  return out;
+  return { files, complete: true };
 }

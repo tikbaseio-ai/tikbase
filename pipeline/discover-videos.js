@@ -10,6 +10,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { deriveCreatorKey } from "../shared/creator-key.js";
 
 const SCRAPECREATORS_API_KEY = process.env.SCRAPECREATORS_API_KEY;
 const SUPABASE_URL =
@@ -239,6 +240,10 @@ async function main() {
           allNewVideos.push({
             product_id: String(product.product_id),
             video_url: videoUrl,
+            // Stamped at insert time — the migration's backfill ran once and
+            // installed no trigger, so an unstamped row never reaches the
+            // creator leaderboard (precompute-creators drops unkeyed rows).
+            creator_key: deriveCreatorKey(videoUrl),
             view_count: views,
             author_name: video?.author?.nickname || null,
             author_avatar_url:

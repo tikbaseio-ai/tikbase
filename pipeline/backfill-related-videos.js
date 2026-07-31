@@ -33,6 +33,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { deriveCreatorKey } from "../shared/creator-key.js";
 
 const SCRAPECREATORS_API_KEY = process.env.SCRAPECREATORS_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -129,6 +130,7 @@ async function upsertRelatedVideos(relatedByProduct) {
         product_id: String(productId),
         video_id: videoId,
         video_url: url,
+        creator_key: deriveCreatorKey(url), // stamp at insert; nothing backfills it
         view_count: toIntOrNull(e?.play_count),
         like_count: toIntOrNull(e?.like_count),
         author_name: e?.author_name || null,

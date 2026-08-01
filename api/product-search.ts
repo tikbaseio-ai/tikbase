@@ -86,6 +86,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const q = String(req.query.q ?? '').trim();
+
+    // Miss-recording flags, for the combined header search.
+    //
+    //   suppress_miss=1  run the search, record nothing. The caller is also
+    //                    searching creators and does not yet know whether the
+    //                    user found anything.
+    //   report_miss=1    record the miss and return immediately. The caller has
+    //                    now seen BOTH sides come back empty.
+    //
+    // Without this, typing a creator's name into the combined box would log a
+    // phantom "missing product" on every keystroke and drown the real signal.
+    const suppressMiss = String(req.query.suppress_miss ?? '') === '1';
+    const reportMiss = String(req.query.report_miss ?? '') === '1';
+
+    if (reportMiss) {
+      if (q.length < MIN_QUERY) return res.status(204).end();
+      const supabase = getAdminClient();
+      const tier = await resolveTier(req, supabase);
+      recordMiss(supabase, q, tier);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ recorded: true, query: q });
+    }
+
     if (q.length < MIN_QUERY) {
       // Not an error — the client calls this on every keystroke. Return the
       // empty shape so the UI has nothing to special-case. Not recorded as a
@@ -104,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) throw new Error(error.message);
 
     const rows = (data as any[]) || [];
-    if (rows.length === 0) recordMiss(supabase, q, tier);
+    if (rows.length === 0 && !suppressMiss) recordMiss(supabase, q, tier);
 
     const results = rows.map((r) => {
       // Thumbnails always go through the proxy. 7,591 of 48,706 product images

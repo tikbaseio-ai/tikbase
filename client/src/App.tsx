@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { PaywallModal } from "@/components/PaywallModal";
 import { Menu } from "lucide-react";
 import AppSidebar from "@/components/AppSidebar";
+import GlobalSearch from "@/components/GlobalSearch";
 import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
 import CreatorsPage from "@/pages/creators";
@@ -61,28 +62,30 @@ function DashboardLayout() {
           document wider instead. Gated at md so the desktop layout — which has
           no overflow today — is untouched. */}
       <main className="flex-1 min-w-0 md:min-w-[auto] md:ml-[220px] min-h-screen">
-        {/* Mobile-only top bar. md:hidden means desktop never renders it. */}
+        {/* Top bar. It exists at every breakpoint now because it carries the
+            global search; the hamburger and wordmark remain mobile-only, since
+            desktop already has the sidebar for both. */}
         <header
-          className="md:hidden sticky top-0 z-30 h-14 flex items-center gap-3 px-4 border-b border-border"
+          className="sticky top-0 z-30 h-14 flex items-center gap-3 px-4 border-b border-border"
           style={{ backgroundColor: '#0d0d10' }}
         >
           <button
             onClick={() => setNavOpen(true)}
             aria-label="Open navigation"
-            className="h-9 w-9 -ml-1.5 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/50 border-none bg-transparent cursor-pointer"
+            className="md:hidden h-9 w-9 -ml-1.5 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/50 border-none bg-transparent cursor-pointer flex-shrink-0"
             data-testid="nav-open"
           >
             <Menu size={20} />
           </button>
-          <Link href="/dashboard" className="flex items-center gap-2 no-underline">
+          <Link href="/dashboard" className="md:hidden flex items-center gap-2 no-underline flex-shrink-0">
             <div
               className="w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-xs"
               style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
             >
               TB
             </div>
-            <span className="text-foreground font-semibold text-sm tracking-wide">TikBase</span>
           </Link>
+          <GlobalSearch />
         </header>
 
         <Switch>

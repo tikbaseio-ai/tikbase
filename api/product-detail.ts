@@ -44,11 +44,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       MAX_VIDEOS,
       Math.max(1, parseInt(String(req.query.limit ?? DEFAULT_VIDEOS), 10) || DEFAULT_VIDEOS),
     );
-    // Ask the database for the full set even on free, so `videosTotal` can be
-    // honest about how many exist while the response only carries three.
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+
+    // Free is pinned to the first page of FREE_VIDEOS no matter what is asked;
+    // paid pages through the whole list. Before this, `page` was ignored and the
+    // limit capped at 60, so a paid user on a 924-video product could not reach
+    // videos 61+ at all — the gating was right but "paid gets all" was not true.
+    const limit = tier === 'free' ? FREE_VIDEOS : requested;
+    const offset = tier === 'free' ? 0 : (page - 1) * limit;
+
     const { data, error } = await supabase.rpc('product_detail', {
       p_product_id: id,
-      p_video_limit: requested,
+      p_video_limit: limit,
+      p_video_offset: offset,
     });
     if (error) throw new Error(error.message);
 
@@ -60,6 +68,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const p = detail.product;
+    // The RPC already applied the tier's limit/offset. The slice stays as a
+    // second, independent guard: if the RPC contract ever changes, free must
+    // still never receive more than FREE_VIDEOS.
     const allVideos = (detail.videos || []) as any[];
     const videos = tier === 'free' ? allVideos.slice(0, FREE_VIDEOS) : allVideos;
     const totals = detail.totals || {};
@@ -127,6 +138,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })),
       videosTotal: Number(totals.videos) || 0,
       videosShown: videos.length,
+      videosPage: tier === 'free' ? 1 : page,
+      videosLimit: limit,
       tier,
     });
   } catch (err: any) {

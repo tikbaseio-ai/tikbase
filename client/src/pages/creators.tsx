@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { Link } from 'wouter';
 import { NICHES, formatViews, authHeader } from '@/lib/supabase';
 import { InfoTip } from '@/components/InfoTip';
-import CreatorSearch, { creatorProfilePath } from '@/components/CreatorSearch';
+import { creatorProfilePath } from '@/components/CreatorSearch';
 import { useSubscription } from '@/hooks/use-subscription';
 import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
@@ -218,11 +218,6 @@ export default function CreatorsPage() {
         Ranked by estimated sales influence across TikTok Shop products.
       </p>
 
-      {/* Search reaches the whole 110k-creator universe, not just the ranked
-          board below — every tier can search, which is the point of it. */}
-      <div className="mb-4">
-        <CreatorSearch />
-      </div>
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-4">

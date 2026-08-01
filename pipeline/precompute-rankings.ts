@@ -147,6 +147,16 @@ async function main() {
     }
   }
 
+  // Refresh the materialised 30-day revenue lookup that product search ranks by
+  // and the product page reads. It is derived from the payloads just written, so
+  // it belongs here rather than in a request. Non-fatal: a stale lookup mis-ranks
+  // search slightly, which is not worth failing a precompute over.
+  if (!dryRun) {
+    const { data: revRows, error: revErr } = await supabase.rpc('refresh_product_revenue_30d');
+    if (revErr) console.warn(`  [WARN] refresh_product_revenue_30d failed: ${revErr.message}`);
+    else console.log(`  product 30d revenue lookup refreshed: ${revRows ?? 0} rows`);
+  }
+
   console.log(
     `\nPrecompute done: ${ok} ok, ${fail} failed in ${((Date.now() - started) / 1000).toFixed(0)}s`,
   );

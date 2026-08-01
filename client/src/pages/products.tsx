@@ -15,7 +15,7 @@ import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDo
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { Link } from 'wouter';
-import ProductSearch, { productDetailPath } from '@/components/ProductSearch';
+import { productDetailPath } from '@/components/ProductSearch';
 
 /** One window's revenue block, as merged server-side by /api/top-products. */
 interface WindowRevenue {
@@ -216,11 +216,6 @@ export default function ProductsPage() {
         </p>
       </div>
 
-      {/* Search reaches the whole ~48k catalogue, not just the ranked page
-          below — and a miss is recorded as a coverage request. */}
-      <div className="mb-4">
-        <ProductSearch />
-      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-3">

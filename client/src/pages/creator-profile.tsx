@@ -155,7 +155,7 @@ export default function CreatorProfilePage() {
     : 1;
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
       <Link
         href="/dashboard/creators"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"

@@ -79,7 +79,7 @@ export default function VideosPage() {
   const nicheLabel = NICHES.find(n => n.slug === niche)?.label || niche;
 
   return (
-    <div className="p-6" data-testid="videos-page">
+    <div className="p-4 md:p-6" data-testid="videos-page">
       {/* First-run "how it works" strip (dismissible) */}
       <OnboardingBanner />
 
@@ -120,7 +120,7 @@ export default function VideosPage() {
         </select>
 
         {/* Timeframe pills */}
-        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border max-w-full overflow-x-auto [&>button]:flex-shrink-0">
           {TIMEFRAMES.map(tf => {
             const isLocked = !isPaid && tf.label !== '1 Week';
             return (

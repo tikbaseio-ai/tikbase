@@ -204,7 +204,7 @@ export default function CreatorsPage() {
   const lockedNiche = (slug: string) => !isPaid && slug !== 'all';
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
       <div className="mb-1 flex items-center gap-2">
         <h1 className="text-xl font-semibold text-foreground">Top Affiliates</h1>
         <InfoTip size={12}>
@@ -247,7 +247,7 @@ export default function CreatorsPage() {
           ))}
         </select>
 
-        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border max-w-full overflow-x-auto [&>button]:flex-shrink-0">
           {WINDOWS.map(w => {
             const isLocked = !isPaid && w.days !== 30;
             return (

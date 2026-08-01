@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const [notifyWeekly, setNotifyWeekly] = useState(true);
 
   return (
-    <div className="p-6 max-w-3xl" data-testid="settings-page">
+    <div className="p-4 md:p-6 max-w-3xl" data-testid="settings-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Settings</h1>
         <p className="text-sm text-muted-foreground">

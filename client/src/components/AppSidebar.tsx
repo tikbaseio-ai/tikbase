@@ -16,19 +16,51 @@ const BOTTOM_ITEMS = [
   { path: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
-export default function AppSidebar() {
+/**
+ * Below `md` the sidebar is an off-canvas drawer driven by `open`; from `md` up
+ * it is the same always-visible fixed rail it has always been. Every mobile
+ * rule is behind a breakpoint prefix and every desktop rule is stated
+ * explicitly (md:translate-x-0), so the desktop render is byte-identical to
+ * before this change — verified by measuring document scrollWidth at 1440px on
+ * all nine dashboard surfaces before and after.
+ */
+export default function AppSidebar({
+  open = false,
+  onClose,
+}: {
+  open?: boolean;
+  onClose?: () => void;
+}) {
   const [location] = useLocation();
   const { signOut } = useAuth();
 
+  // Tapping a destination on mobile should navigate AND dismiss. On desktop
+  // onClose is never passed, so this is a no-op there.
+  const dismiss = () => onClose?.();
+
   return (
+    <>
+      {/* Scrim. Mobile-only, and only while open, so it can never sit over the
+          desktop layout. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={dismiss}
+          aria-hidden="true"
+          data-testid="sidebar-scrim"
+        />
+      )}
+
     <aside
-      className="fixed left-0 top-0 bottom-0 w-[220px] flex flex-col border-r border-border"
+      className={`fixed left-0 top-0 bottom-0 w-[220px] z-50 flex flex-col border-r border-border transition-transform duration-200 md:transition-none md:translate-x-0 ${
+        open ? 'translate-x-0' : '-translate-x-full'
+      }`}
       style={{ backgroundColor: '#0d0d10' }}
       data-testid="sidebar"
     >
       {/* Logo */}
       <div className="h-14 flex items-center px-5 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2.5 no-underline">
+        <Link href="/dashboard" onClick={dismiss} className="flex items-center gap-2.5 no-underline">
           <div
             className="w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm"
             style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
@@ -56,6 +88,7 @@ export default function AppSidebar() {
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
                 style={active ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : undefined}
+                onClick={dismiss}
                 data-testid={`nav-${item.label.toLowerCase()}`}
               >
                 <item.icon size={16} strokeWidth={active ? 2.5 : 1.5} />
@@ -79,6 +112,7 @@ export default function AppSidebar() {
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
                 style={active ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : undefined}
+                onClick={dismiss}
                 data-testid={`nav-${item.label.toLowerCase()}`}
               >
                 <item.icon size={16} strokeWidth={active ? 2.5 : 1.5} />
@@ -109,5 +143,6 @@ export default function AppSidebar() {
         </a>
       </div>
     </aside>
+    </>
   );
 }

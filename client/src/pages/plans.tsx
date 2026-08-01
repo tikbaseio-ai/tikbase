@@ -63,7 +63,7 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto" data-testid="plans-page">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto" data-testid="plans-page">
       <div className="mb-8 text-center">
         <h1 className="text-xl font-semibold text-foreground mb-1">Plans</h1>
         <p className="text-sm text-muted-foreground">

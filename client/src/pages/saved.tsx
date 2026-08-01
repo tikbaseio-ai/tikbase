@@ -13,7 +13,7 @@ export default function SavedPage() {
   } = useBookmarks();
 
   return (
-    <div className="p-6" data-testid="saved-page">
+    <div className="p-4 md:p-6" data-testid="saved-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Saved</h1>
         <p className="text-sm text-muted-foreground">

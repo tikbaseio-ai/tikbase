@@ -39,7 +39,7 @@ export default function BillingPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl" data-testid="billing-page">
+    <div className="p-4 md:p-6 max-w-3xl" data-testid="billing-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Billing</h1>
         <p className="text-sm text-muted-foreground">

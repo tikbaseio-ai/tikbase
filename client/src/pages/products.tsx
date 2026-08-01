@@ -14,6 +14,8 @@ import { useSubscription } from '@/hooks/use-subscription';
 import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package, Sparkles } from 'lucide-react';
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
+import { Link } from 'wouter';
+import ProductSearch, { productDetailPath } from '@/components/ProductSearch';
 
 /** One window's revenue block, as merged server-side by /api/top-products. */
 interface WindowRevenue {
@@ -214,6 +216,12 @@ export default function ProductsPage() {
         </p>
       </div>
 
+      {/* Search reaches the whole ~48k catalogue, not just the ranked page
+          below — and a miss is recorded as a coverage request. */}
+      <div className="mb-4">
+        <ProductSearch />
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
         {/* Ranking-mode toggle */}
@@ -406,7 +414,13 @@ export default function ProductsPage() {
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-start gap-1.5">
-                              <p className="text-xs font-medium text-foreground line-clamp-2 leading-snug">{product.title}</p>
+                              <Link
+                                href={productDetailPath(product.product_id)}
+                                className="text-xs font-medium text-foreground line-clamp-2 leading-snug hover:text-[#a3ff00] transition-colors"
+                                data-testid={`product-link-${product.product_id}`}
+                              >
+                                {product.title}
+                              </Link>
                               {/* Inline with the name, because it is a property
                                   of the product, not another metric column. */}
                               {product.opportunity && (

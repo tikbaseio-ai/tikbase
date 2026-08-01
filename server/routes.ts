@@ -9,6 +9,8 @@ import avatarHandler from "../api/avatar";
 import thumbHandler from "../api/thumb";
 import creatorSearchHandler from "../api/creator-search";
 import creatorProfileHandler from "../api/creator-profile";
+import productSearchHandler from "../api/product-search";
+import productDetailHandler from "../api/product-detail";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -348,6 +350,26 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("creator-profile (proxy) error:", err?.message);
       if (!res.headersSent) res.status(500).json({ error: "Failed to load creator" });
+    }
+  });
+
+  // ---- Product search (type-ahead) ----
+  app.get("/api/product-search", async (req, res) => {
+    try {
+      await productSearchHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("product-search (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // ---- Product detail ----
+  app.get("/api/product-detail", async (req, res) => {
+    try {
+      await productDetailHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("product-detail (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load product" });
     }
   });
 

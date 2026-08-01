@@ -204,7 +204,7 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="p-6" data-testid="products-page">
+    <div className="p-4 md:p-6" data-testid="products-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">
@@ -217,7 +217,7 @@ export default function ProductsPage() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
         {/* Ranking-mode toggle */}
-        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border max-w-full overflow-x-auto [&>button]:flex-shrink-0">
           {([['bestsellers', 'Best Sellers'], ['trending', 'Trending']] as const).map(([val, label]) => (
             <button
               key={val}
@@ -253,7 +253,7 @@ export default function ProductsPage() {
           ))}
         </select>
 
-        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border">
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border max-w-full overflow-x-auto [&>button]:flex-shrink-0">
           {TIMEFRAMES.map(tf => {
             const isLocked = !isPaid && tf.label !== '1 Week';
             return (
@@ -343,6 +343,7 @@ export default function ProductsPage() {
                     tip="Lifetime units sold as reported by TikTok Shop — not the window figure."
                   />
                   <SortHeader
+                    className="hidden md:table-cell"
                     label="In Stock"
                     sortKeyVal="stock_quantity"
                     tip={<>Units currently in stock, when TikTok reports them. Mostly it does not:
@@ -351,11 +352,12 @@ export default function ProductsPage() {
                       Treat a present number as a signal and an absent one as no information.</>}
                   />
                   <SortHeader
+                    className="hidden md:table-cell"
                     label="Creators"
                     sortKeyVal="distinct_creators"
                     tip="Distinct creators who posted about this product inside the ranking window — at 30 days this is creators per month. Low creators against proven sales is the opportunity signal."
                   />
-                  <th className="py-3 px-3 font-medium text-[11px] text-muted-foreground">
+                  <th className="hidden md:table-cell py-3 px-3 font-medium text-[11px] text-muted-foreground">
                     <div className="flex items-center gap-1 justify-end">
                       Affiliate&nbsp;%
                       <InfoTip size={11}>
@@ -370,6 +372,7 @@ export default function ProductsPage() {
                     </div>
                   </th>
                   <SortHeader
+                    className="hidden md:table-cell"
                     label="Views"
                     sortKeyVal="periodViews"
                     tip="TikTok views from videos posted within the ranking window. This is what the Trending mode sorts by."
@@ -465,7 +468,7 @@ export default function ProductsPage() {
                       </td>
 
                       {/* In stock */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-3 px-3 text-right">
                         <span className="font-mono text-xs text-foreground">
                           {product.stock_quantity != null && product.stock_quantity > 0
                             ? formatCompactNumber(product.stock_quantity)
@@ -478,7 +481,7 @@ export default function ProductsPage() {
                           product that is measurably selling" is precisely the
                           opportunity signal, and a dash would read as "unknown"
                           and hide it. Only a missing field dashes. */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-3 px-3 text-right">
                         <span
                           className="font-mono text-xs text-foreground"
                           title={
@@ -495,7 +498,7 @@ export default function ProductsPage() {
 
                       {/* Affiliate intensity — null (no window videos) shows a
                           dash, never 0%, which would claim nobody was paid. */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-3 px-3 text-right">
                         <span className="font-mono text-xs text-muted-foreground">
                           {product.affiliate_intensity == null
                             ? '—'
@@ -504,7 +507,7 @@ export default function ProductsPage() {
                       </td>
 
                       {/* Views — the Trending ranking signal */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-3 px-3 text-right">
                         <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this window\n' + m.totalViews.toLocaleString() + ' total views all-time'}>
                           <span className="font-mono text-xs text-foreground">
                             {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (

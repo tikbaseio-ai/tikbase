@@ -1,4 +1,5 @@
-import { Switch, Route, Router, Redirect } from "wouter";
+import { useState, useEffect } from "react";
+import { Switch, Route, Router, Redirect, Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -8,6 +9,7 @@ import { BookmarkProvider } from "@/lib/bookmarks";
 import { SubscriptionProvider } from "@/hooks/use-subscription";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { PaywallModal } from "@/components/PaywallModal";
+import { Menu } from "lucide-react";
 import AppSidebar from "@/components/AppSidebar";
 import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
@@ -32,10 +34,56 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 }
 
 function DashboardLayout() {
+  const [navOpen, setNavOpen] = useState(false);
+  const [location] = useLocation();
+
+  // Any navigation closes the drawer. Route changes that do not originate from
+  // a nav tap (back button, a link inside a page) would otherwise leave it open
+  // over the new page.
+  useEffect(() => { setNavOpen(false); }, [location]);
+
+  // Escape closes it too — the drawer traps the whole screen behind a scrim, so
+  // it needs a keyboard way out for anyone on a small laptop or with a keyboard
+  // attached to a tablet.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [navOpen]);
+
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: '#0a0a0c' }}>
-      <AppSidebar />
-      <main className="flex-1 ml-[220px] min-h-screen">
+      <AppSidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      {/* min-w-0 lets the overflow-x-auto table wrappers actually scroll: a flex
+          item defaults to min-width:auto, which lets a wide table push the whole
+          document wider instead. Gated at md so the desktop layout — which has
+          no overflow today — is untouched. */}
+      <main className="flex-1 min-w-0 md:min-w-[auto] md:ml-[220px] min-h-screen">
+        {/* Mobile-only top bar. md:hidden means desktop never renders it. */}
+        <header
+          className="md:hidden sticky top-0 z-30 h-14 flex items-center gap-3 px-4 border-b border-border"
+          style={{ backgroundColor: '#0d0d10' }}
+        >
+          <button
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            className="h-9 w-9 -ml-1.5 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/50 border-none bg-transparent cursor-pointer"
+            data-testid="nav-open"
+          >
+            <Menu size={20} />
+          </button>
+          <Link href="/dashboard" className="flex items-center gap-2 no-underline">
+            <div
+              className="w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-xs"
+              style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            >
+              TB
+            </div>
+            <span className="text-foreground font-semibold text-sm tracking-wide">TikBase</span>
+          </Link>
+        </header>
+
         <Switch>
           <Route path="/dashboard" component={() => <ProtectedRoute component={VideosPage} />} />
           <Route path="/dashboard/overview" component={() => <ProtectedRoute component={OverviewPage} />} />

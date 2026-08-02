@@ -10,6 +10,10 @@
 //   1 credit per request, 5.6-6.8s latency
 //   200 -> { success, credits_remaining, credits_charged, id, url, transcript }
 //          `transcript` is WebVTT; there is no language field in the response.
+//   NO CAPTIONS IS NOT AN ERROR STATUS (Step 0, 2026-08-02): the vendor answers
+//   200 with `transcript: null` and charges a credit anyway, for both a
+//   caption-less video and an unresolvable one. Only the presence of `id`
+//   separates the two.
 //   The `use_ai_as_fallback=true` option costs 10 CREDITS and is never sent.
 //
 // The parameter is a URL, not an id, so the video_url is looked up from
@@ -253,15 +257,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 5b. A SUCCESSFUL ANSWER WITH NO TRANSCRIPT — cache as permanently
     //     unavailable, so the same video is never paid for twice.
     //
-    //     HONEST LIMIT: this exact shape is INFERRED, not observed. The probe
-    //     that was supposed to confirm it (a music-only video) could not run —
-    //     the account was out of credits on 2026-08-01 and every endpoint
-    //     returned 402. The condition below is deliberately narrow: HTTP 200
-    //     AND success === true AND an empty transcript cannot be an auth,
-    //     credit or transport failure, so it can only mean "the vendor looked
-    //     and there was nothing". Re-run the probe when credits return and
-    //     tighten this if the real shape differs.
+    //     OBSERVED, Step 0 re-run on 2026-08-02 (3 credits). The vendor does not
+    //     use an error status for "no captions". It answers 200 with
+    //     `transcript: null` — note null, not an empty string — and still
+    //     charges 1 credit:
+    //
+    //       no-speech video   200 success:true transcript:null  charged 1  (id present)
+    //       invalid video id  200 success:true transcript:null  charged 1  (id ABSENT)
+    //       known-good        200 success:true transcript:<vtt> charged 1  (id present)
+    //
+    //     So the narrow condition written before the probe was correct, and the
+    //     `typeof transcript === 'string'` guard above is what makes null fall
+    //     through to here rather than being stored as an empty 'ok'.
+    //
+    //     The `id` field is the only thing separating "the vendor found the
+    //     video and it has no speech" from "the vendor could not resolve the
+    //     video at all". Both are permanently unavailable to us and both are
+    //     cached, so the distinction only changes the reason recorded — but it
+    //     costs nothing to record it accurately.
     if (httpStatus === 200 && body?.success === true) {
+      const resolvedByVendor = body?.id !== undefined && body?.id !== null;
       await supabase.from('video_transcripts').upsert(
         {
           video_id: videoId,
@@ -278,8 +293,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({
         video_id: videoId,
         status: 'unavailable',
-        reason: 'no_captions',
-        message: 'This video has no captions to pull a script from.',
+        reason: resolvedByVendor ? 'no_captions' : 'video_not_found',
+        message: resolvedByVendor
+          ? 'This video has no captions to pull a script from.'
+          : 'TikTok no longer serves this video, so there is no script to pull.',
       });
     }
 

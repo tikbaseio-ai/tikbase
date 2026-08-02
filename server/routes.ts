@@ -11,6 +11,7 @@ import creatorSearchHandler from "../api/creator-search";
 import creatorProfileHandler from "../api/creator-profile";
 import productSearchHandler from "../api/product-search";
 import productDetailHandler from "../api/product-detail";
+import videoTranscriptHandler from "../api/video-transcript";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -370,6 +371,16 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("product-detail (proxy) error:", err?.message);
       if (!res.headersSent) res.status(500).json({ error: "Failed to load product" });
+    }
+  });
+
+  // ---- Video transcript ("study the script") ----
+  app.get("/api/video-transcript", async (req, res) => {
+    try {
+      await videoTranscriptHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("video-transcript (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load transcript" });
     }
   });
 

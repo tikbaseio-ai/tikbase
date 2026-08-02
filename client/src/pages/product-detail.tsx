@@ -6,6 +6,7 @@ import { InfoTip } from '@/components/InfoTip';
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { creatorProfilePath } from '@/components/CreatorSearch';
+import { ScriptButton } from '@/components/ScriptPanel';
 import {
   ArrowLeft, ExternalLink, Lock, PackageSearch, AlertCircle, Play,
   Video, Users, Eye, Percent, BadgeDollarSign,
@@ -298,12 +299,12 @@ export default function ProductDetailPage() {
                   // out to TikTok; the profile link sits beside it.
                   <div
                     key={v.video_id || v.video_url || i}
-                    className="group rounded-lg border border-border overflow-hidden bg-card hover:border-[#a3ff00]/40 transition-colors"
+                    className="group relative rounded-lg border border-border bg-card hover:border-[#a3ff00]/40 transition-colors"
                   >
                     <a
                       href={v.video_url || '#'}
                       target="_blank" rel="noopener noreferrer"
-                      className="block relative aspect-[9/16] bg-secondary overflow-hidden"
+                      className="block relative aspect-[9/16] bg-secondary overflow-hidden rounded-t-lg"
                       data-testid="product-video-tile"
                     >
                       {vid && (
@@ -350,6 +351,9 @@ export default function ProductDetailPage() {
                             profile
                           </Link>
                         )}
+                      </div>
+                      <div className="mt-1.5">
+                        <ScriptButton videoId={vid} videoUrl={v.video_url} />
                       </div>
                     </div>
                   </div>

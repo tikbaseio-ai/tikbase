@@ -23,10 +23,15 @@ import { createClient } from '@supabase/supabase-js';
 import { computeTopProducts, loadWindowStats } from '../api/top-products';
 import { computeTopVideos } from '../api/top-videos';
 
+// Must match the client's NICHES and precompute-creators' list. It did not:
+// haircare, makeup, mens-grooming and supplements were selectable in the UI and
+// discovered nightly, but never precomputed into product rankings, so those four
+// pages had nothing to serve — 2,990 products invisible.
 const NICHE_SLUGS = [
   'all', 'beauty-skincare', 'gym-fitness', 'health-wellness', 'mens-wear',
   'womens-wear', 'tech-gadgets', 'pet-products', 'home-kitchen', 'food-beverage',
   'shoes-footwear', 'accessories-jewelry', 'baby-kids', 'toys-games', 'fragrance',
+  'makeup', 'supplements', 'mens-grooming', 'haircare', 'collectibles',
 ];
 const DAYS = [7, 14, 30, 90, 180, 365];
 const STORE_TOP_N_PRODUCTS = 400; // enough for pagination; free tier is capped anyway

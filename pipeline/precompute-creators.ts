@@ -25,7 +25,7 @@ const NICHE_SLUGS = [
   'all', 'beauty-skincare', 'gym-fitness', 'health-wellness', 'mens-wear',
   'womens-wear', 'tech-gadgets', 'pet-products', 'home-kitchen', 'food-beverage',
   'shoes-footwear', 'accessories-jewelry', 'baby-kids', 'toys-games', 'fragrance',
-  'makeup', 'supplements', 'mens-grooming', 'haircare',
+  'makeup', 'supplements', 'mens-grooming', 'haircare', 'collectibles',
 ];
 // The leaderboard windows. Both must exist as products:<niche>:<days> keys in
 // rankings_cache, because that is where per-product revenue is sourced.

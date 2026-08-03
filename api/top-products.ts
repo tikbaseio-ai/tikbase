@@ -2,6 +2,12 @@
 // (revenue estimates, period views, units sold) that were previously
 // computed in the browser after fetching all products + videos + snapshots.
 //
+// View arithmetic is done in SQL (product_view_stats). It used to be done in JS
+// over a video read that PostgREST silently truncated to 1000 rows per batch —
+// see the 2026-08-03 migration for the measured damage. getVideoPostDate, the
+// snowflake decoder that windowed those rows, went with it: post_ts on
+// product_videos is now the single definition of when a video was posted.
+//
 // Caches results for 1 hour. Returns paginated, pre-sorted results.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -20,18 +26,11 @@ const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 // actually reach a payload — so the cached and live-computed paths agree.
 export const OPPORTUNITY_POOL = 400;
 
-function getVideoPostDate(videoUrl: string): Date | null {
-  const match = videoUrl?.match(/video\/(\d+)/);
-  if (!match) return null;
-  try {
-    const ts = Number(BigInt(match[1]) >> 32n);
-    const date = new Date(ts * 1000);
-    if (date.getFullYear() < 2020 || date.getFullYear() > 2027) return null;
-    return date;
-  } catch {
-    return null;
-  }
-}
+// Products per product_view_stats / product_top_videos call. The top-videos RPC
+// returns up to 5 rows per product, so 150 x 5 = 750 stays under PostgREST's
+// 1000-row response cap — the very cap this replaced.
+const VIEW_STATS_CHUNK = 150;
+
 
 // Days since we first saw this product in our data. TikTok Shop product IDs are
 // NOT snowflake-timestamped like video IDs — decoding product_id as a snowflake
@@ -110,30 +109,31 @@ function calculateSnapshotDelta(
   return Math.round(delta * (periodDays / spanDays));
 }
 
+interface ViewStats {
+  periodViews: number;
+  periodVideoCount: number;
+  totalViews: number;
+  videoCount: number;
+}
+
 function estimateProductMetrics(
   product: any,
   videos: any[],
   periodDays: number,
   categoryMedianPrice: number,
   snapshots: any[],
+  stats: ViewStats | undefined,
 ) {
   const now = new Date();
-  const cutoff = new Date(now.getTime() - periodDays * 86400000);
   const daysActive = firstSeenDaysActive(product, snapshots, now);
 
-  let periodViews = 0;
-  let periodVideoCount = 0;
-  let totalViews = 0;
-
-  for (const v of videos) {
-    const views = v.view_count || 0;
-    totalViews += views;
-    const postDate = getVideoPostDate(v.video_url);
-    if (postDate && postDate >= cutoff) {
-      periodViews += views;
-      periodVideoCount++;
-    }
-  }
+  // Summed in SQL over EVERY video row. Previously summed in JS over whatever
+  // survived PostgREST's 1000-row response cap, which on the top batch meant
+  // 2.4% of the rows. `videos` is now just the top 5 thumbnails and must never
+  // be used for arithmetic again.
+  const periodViews = stats?.periodViews ?? 0;
+  const periodVideoCount = stats?.periodVideoCount ?? 0;
+  const totalViews = stats?.totalViews ?? 0;
 
   // sold_count: the products-table row can lag the fresh daily snapshot; since
   // sold_count is cumulative (monotonic), take the higher of the two. Feeds the
@@ -506,21 +506,57 @@ export async function computeTopProducts(
   const videoMap: Record<string, any[]> = {};
   const snapMap: Record<string, any[]> = {};
 
-  for (let i = 0; i < pids.length; i += 200) {
-    const batch = pids.slice(i, i + 200);
+  // View stats come from SQL, not from reading every video row.
+  //
+  // The old read asked for 5000 video rows per 200-product batch and PostgREST
+  // returned 1000, silently. Measured on the top-200 batch of 'all': 41,342 rows
+  // exist, 1,000 came back (97.6% dropped), 25 products were invisible entirely
+  // and reported totalViews 0, and one real 141,205,644-view product looked
+  // empty. It skewed hardest on the highest-ranked products, because the batch
+  // is ordered by sold_count and the biggest sellers carry the most videos.
+  //
+  // Aggregating server-side returns one row per product instead of one per
+  // video, so there is nothing to truncate. Thumbnails come from a second RPC
+  // that gives each product its own top N rather than the batch's top N.
+  const viewStats = new Map<string, {
+    periodViews: number; periodVideoCount: number; totalViews: number; videoCount: number;
+  }>();
 
-    const { data: vids } = await supabase
-      .from('product_videos')
-      .select('product_id, video_url, view_count, cover_image_url')
-      .in('product_id', batch)
-      .order('view_count', { ascending: false })
-      .limit(5000);
-    if (vids) {
-      for (const v of vids) {
+  for (let i = 0; i < pids.length; i += VIEW_STATS_CHUNK) {
+    const batch = pids.slice(i, i + VIEW_STATS_CHUNK);
+    const { data: stats, error: statsErr } = await supabase.rpc('product_view_stats', {
+      p_days: days,
+      p_product_ids: batch,
+    });
+    if (statsErr) {
+      console.warn(`  [WARN] product_view_stats chunk failed: ${statsErr.message}`);
+    } else {
+      for (const r of (stats as any[]) || []) {
+        viewStats.set(String(r.product_id), {
+          periodViews: Number(r.period_views) || 0,
+          periodVideoCount: Number(r.period_video_count) || 0,
+          totalViews: Number(r.total_views) || 0,
+          videoCount: Number(r.video_count) || 0,
+        });
+      }
+    }
+
+    const { data: tops, error: topsErr } = await supabase.rpc('product_top_videos', {
+      p_product_ids: batch,
+      p_limit: 5,
+    });
+    if (topsErr) {
+      console.warn(`  [WARN] product_top_videos chunk failed: ${topsErr.message}`);
+    } else {
+      for (const v of (tops as any[]) || []) {
         if (!videoMap[v.product_id]) videoMap[v.product_id] = [];
         videoMap[v.product_id].push(v);
       }
     }
+  }
+
+  for (let i = 0; i < pids.length; i += 200) {
+    const batch = pids.slice(i, i + 200);
 
     const { data: snaps } = await supabase
       .from('product_snapshots')
@@ -546,7 +582,9 @@ export async function computeTopProducts(
   const enriched = products.map((p) => {
     const videos = videoMap[p.product_id] || [];
     const snapshots = snapMap[p.product_id] || [];
-    const metrics = estimateProductMetrics(p, videos, days, medianPrice, snapshots);
+    const metrics = estimateProductMetrics(
+      p, videos, days, medianPrice, snapshots, viewStats.get(String(p.product_id)),
+    );
     // Get top 5 video thumbnails — fall back to product image if video has no cover
     const topVideos = videos.slice(0, 5).map((v: any) => ({
       video_url: v.video_url,
@@ -585,7 +623,10 @@ export async function computeTopProducts(
   const thresholds = annotateOpportunity(pool);
   for (const r of enriched.slice(OPPORTUNITY_POOL)) r.opportunity = false;
   console.log(
-    `    opportunity ${nicheSlug}:${days} — revenue p75 $${thresholds.revenueP75.toFixed(0)}, ` +
+    `    opportunity ${nicheSlug}:${days} — revenue p75 ` +
+    // An empty payload has no p75; Infinity is correct arithmetic and useless
+    // output, and a new niche logs it every night until discovery fills in.
+    `${Number.isFinite(thresholds.revenueP75) ? '$' + thresholds.revenueP75.toFixed(0) : 'n/a'}, ` +
     `creator median ${thresholds.creatorMedian}, ${thresholds.badged}/${pool.length} badged`,
   );
 

@@ -123,7 +123,16 @@ async function apiFetch(path) {
     const text = await res.text().catch(() => "");
     throw new Error(`API ${res.status} for ${path}: ${text.slice(0, 200)}`);
   }
-  return res.json();
+  const body = await res.json();
+  // Every successful response carries the balance. Recording it costs nothing
+  // and is the only way to see the wall coming BEFORE the run that hits it —
+  // the existing check only fires once 402s have already cost us a day of data.
+  if (body && typeof body.credits_remaining === "number") {
+    stats.credits_remaining = body.credits_remaining;
+    if (stats.credits_at_start === null) stats.credits_at_start = body.credits_remaining;
+  }
+  stats.api_calls++;
+  return body;
 }
 
 function today() {
@@ -132,6 +141,9 @@ function today() {
 
 // Summary counters
 const stats = {
+  api_calls: 0,
+  credits_at_start: null,
+  credits_remaining: null,
   phase1_videos: 0,
   phase1_products: 0,
   phase2_products: 0,
@@ -254,9 +266,19 @@ const NICHE_LABELS = {
   "mens-grooming": "Men's Grooming",
   "haircare": "Haircare",
   "makeup": "Makeup & Cosmetics",
+  "collectibles": "Collectibles & Trading Cards",
 };
 
 const KEYWORD_QUERIES = {
+  // Purchase-intent only: every query names the shop or a buying action, so the
+  // results are products people are actually buying rather than fan content.
+  "collectibles": [
+    "tiktok shop trading cards",
+    "tiktok shop collectibles viral",
+    "tiktok made me buy it collectibles",
+    "pokemon cards tiktok shop",
+    "funko pop tiktok shop",
+  ],
   "beauty-skincare": [
     "tiktok shop skincare viral",
     "tiktok made me buy it skincare",
@@ -506,6 +528,7 @@ const KEYWORD_QUERIES = {
 };
 
 const SHOP_SEARCH_TERMS = {
+  "collectibles": ["trading cards", "collectibles", "funko pop", "pokemon cards"],
   "beauty-skincare": ["skincare", "beauty", "makeup", "serum", "moisturizer"],
   "gym-fitness": [
     "gym equipment",
@@ -1706,6 +1729,42 @@ async function main() {
     // the whole recovery procedure.
     process.exitCode = 1;
   }
+  // ---- Credit early warning -------------------------------------------
+  // Reports the balance and what this run actually burned, then projects how
+  // many more runs fit. The existing block above only speaks once 402s have
+  // already happened; by then a day of collection is gone. This speaks while
+  // there is still time to top up.
+  if (stats.credits_remaining !== null) {
+    const burned =
+      stats.credits_at_start !== null
+        ? Math.max(0, stats.credits_at_start - stats.credits_remaining)
+        : null;
+    const runsLeft = burned && burned > 0
+      ? Math.floor(stats.credits_remaining / burned)
+      : null;
+    console.log(
+      `\nCredits: ${stats.credits_remaining.toLocaleString()} remaining` +
+      (burned !== null ? ` | this run burned ~${burned.toLocaleString()} over ${stats.api_calls} calls` : '') +
+      (runsLeft !== null ? ` | ~${runsLeft} more run(s) at this rate` : ''),
+    );
+    // Two runs of headroom: enough to notice on a weekday and act before the
+    // next cron fires. Warn loudly but do NOT fail the run — the data collected
+    // is still good, and a red build for a balance that is merely low would
+    // train people to ignore red builds.
+    if (runsLeft !== null && runsLeft <= 2) {
+      console.warn(
+        `\n  ${"!".repeat(60)}\n` +
+        `  CREDIT WARNING: only ~${runsLeft} run(s) of headroom left ` +
+        `(${stats.credits_remaining.toLocaleString()} credits, ~${burned.toLocaleString()}/run).\n` +
+        `  Top up before the next scheduled run or it will starve mid-way, as on\n` +
+        `  2026-07-19/20 and again 2026-07-31..08-02.\n` +
+        `  ${"!".repeat(60)}`,
+      );
+    }
+  } else {
+    console.warn('\nCredits: balance unknown — no vendor response carried credits_remaining.');
+  }
+
   console.log(`\ntikbase daily refresh completed at ${new Date().toISOString()}`);
 }
 

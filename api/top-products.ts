@@ -31,6 +31,22 @@ export const OPPORTUNITY_POOL = 400;
 // 1000-row response cap — the very cap this replaced.
 const VIEW_STATS_CHUNK = 150;
 
+// Snapshot bounds return up to 2 + |windows| rows per product (~5.8 measured),
+// so 100 products stays comfortably under the same 1000-row cap that broke the
+// read this replaced.
+const SNAPSHOT_CHUNK = 100;
+
+// The windows calculateSnapshotDelta asks for: the requested one, plus the
+// shorter ones it falls back to when the requested window has no usable delta.
+const SNAPSHOT_BASELINE_DAYS = [7, 14, 30, 90, 180, 365];
+
+// Snapshot bounds are memoised per product across the whole run. The window list
+// above is fixed, so the rows returned for a product are the same for every
+// niche x window combo — and precompute-rankings makes 90 of those. Without the
+// memo the nightly job would re-fetch the same bounds ~90 times, roughly 42,000
+// round trips, which is a far worse regression than the bug being fixed.
+const snapshotBoundsCache = new Map<string, { rows: any[]; timestamp: number }>();
+
 
 // Days since we first saw this product in our data. TikTok Shop product IDs are
 // NOT snowflake-timestamped like video IDs — decoding product_id as a snowflake
@@ -80,6 +96,28 @@ function calculateSnapshotDelta(
   }
   if (baseline.snapshot_date > cutoffStr) return null;
   if (baseline.snapshot_date >= latest.snapshot_date) return null;
+
+  // A baseline of 0 is a MISSING READING, not a product that had sold nothing.
+  // The pipeline writes a snapshot row whether or not sold_count came back, so
+  // the first snapshot of a newly-tracked product is routinely 0 — and then
+  // `latest - 0` is the product's entire lifetime volume, reported as if it all
+  // happened inside the window.
+  //
+  // This was invisible until the snapshot read was fixed: baselines used to be
+  // months stale and got rejected by the span check below before anyone noticed
+  // the zero. With correct baselines it surfaced immediately —
+  // beauty-skincare:30 jumped to $112M of "measured" revenue, with the top rows
+  // showing deltas equal to (and in two cases exceeding) their own lifetime
+  // sold_count:
+  //
+  //   A313 Vitamin A Balm     baseline 2026-06-27 = 0 -> 206,497   lifetime 206,310
+  //   Dr.Melaxin Eye Cream    baseline 2026-06-27 = 0 -> 323,397   lifetime 292,435
+  //
+  // We cannot distinguish "genuinely sold nothing before" from "we had no
+  // reading", so a zero baseline does not earn the hasRealDelta badge. The
+  // estimator handles those products instead, which understates rather than
+  // inventing an 18x overstatement.
+  if (!(baseline.sold_count > 0)) return null;
 
   const delta = Math.max(
     0,
@@ -555,20 +593,53 @@ export async function computeTopProducts(
     }
   }
 
-  for (let i = 0; i < pids.length; i += 200) {
-    const batch = pids.slice(i, i + 200);
+  for (let i = 0; i < pids.length; i += SNAPSHOT_CHUNK) {
+    const batch = pids.slice(i, i + SNAPSHOT_CHUNK);
 
-    const { data: snaps } = await supabase
-      .from('product_snapshots')
-      .select('product_id, sold_count, sale_price, snapshot_date')
-      .in('product_id', batch)
-      .order('snapshot_date', { ascending: true })
-      .limit(10000);
-    if (snaps) {
-      for (const s of snaps) {
-        if (!snapMap[s.product_id]) snapMap[s.product_id] = [];
-        snapMap[s.product_id].push(s);
+    // Snapshots: bounded per product, not "the first 1000 rows of the table".
+    //
+    // The old read asked for 10,000 rows per batch, got PostgREST's 1000, and
+    // sorted snapshot_date ASCENDING — so it returned the globally oldest slice:
+    // 2026-03-16..2026-04-17 while August rows existed. The estimator was
+    // computing 7-day deltas from 3.5-month-old baselines and then rejecting
+    // them via its own span check, which is why hasRealDelta was ~1%.
+    //
+    // product_snapshot_bounds returns only the rows the estimator actually
+    // reads: earliest, latest, and the newest row on or before each window it
+    // tries. See the 2026-08-03 migration for why that is semantically
+    // equivalent to holding the whole series.
+    const missing = batch.filter((id) => {
+      const hit = snapshotBoundsCache.get(id);
+      return !hit || Date.now() - hit.timestamp >= CACHE_TTL;
+    });
+
+    if (missing.length) {
+      const { data: snaps, error: snapErr } = await supabase.rpc('product_snapshot_bounds', {
+        p_product_ids: missing,
+        p_days: SNAPSHOT_BASELINE_DAYS,
+      });
+      if (snapErr) {
+        // Non-fatal and conservative: a product with no bounds gets no delta and
+        // falls back to the estimator, which understates rather than inventing.
+        console.warn(`  [WARN] product_snapshot_bounds chunk failed: ${snapErr.message}`);
+      } else {
+        const fetched = new Map<string, any[]>();
+        for (const r of (snaps as any[]) || []) {
+          if (!fetched.has(r.product_id)) fetched.set(r.product_id, []);
+          fetched.get(r.product_id)!.push(r);
+        }
+        const now = Date.now();
+        // Cache the empties too — a product with no snapshots must not be
+        // re-requested once per combo for the rest of the run.
+        for (const id of missing) {
+          snapshotBoundsCache.set(id, { rows: fetched.get(id) ?? [], timestamp: now });
+        }
       }
+    }
+
+    for (const id of batch) {
+      const hit = snapshotBoundsCache.get(id);
+      if (hit && hit.rows.length) snapMap[id] = hit.rows.slice();
     }
   }
 

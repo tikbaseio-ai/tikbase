@@ -6,6 +6,7 @@ import { InfoTip } from '@/components/InfoTip';
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { creatorProfilePath } from '@/components/CreatorSearch';
+import { brandProfilePath } from '@/components/GlobalSearch';
 import { ScriptButton } from '@/components/ScriptPanel';
 import {
   ArrowLeft, ExternalLink, Lock, PackageSearch, AlertCircle, Play,
@@ -34,6 +35,7 @@ interface DetailData {
     product_id: string;
     title: string;
     seller_name: string | null;
+    seller_id: string | null;
     seller_tiktok_url: string | null;
     product_url: string | null;
     niche_slug: string | null;
@@ -187,7 +189,17 @@ export default function ProductDetailPage() {
               <h1 className="text-lg md:text-xl font-semibold text-foreground leading-snug">{p.title}</h1>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-muted-foreground">
                 {p.seller_name && (
-                  <span className="text-foreground">{p.seller_name}</span>
+                  p.seller_id ? (
+                    <Link
+                      href={brandProfilePath(p.seller_id)}
+                      className="text-foreground hover:text-[#a3ff00] transition-colors"
+                      data-testid="product-detail-brand-link"
+                    >
+                      {p.seller_name}
+                    </Link>
+                  ) : (
+                    <span className="text-foreground">{p.seller_name}</span>
+                  )
                 )}
                 {p.niche_label && (
                   <span className="px-1.5 py-0.5 rounded border border-border text-[10px] uppercase tracking-wide">

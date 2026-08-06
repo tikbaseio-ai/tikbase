@@ -16,6 +16,7 @@ import OverviewPage from "@/pages/overview";
 import VideosPage from "@/pages/videos";
 import CreatorsPage from "@/pages/creators";
 import CreatorProfilePage from "@/pages/creator-profile";
+import BrandProfilePage from "@/pages/brand-profile";
 import ProductDetailPage from "@/pages/product-detail";
 import ProductsPage from "@/pages/products";
 import SavedPage from "@/pages/saved";
@@ -97,6 +98,9 @@ function DashboardLayout() {
               numeric half of the creator universe). */}
           <Route path="/dashboard/creator/:key" component={() => <ProtectedRoute component={CreatorProfilePage} />} />
           <Route path="/dashboard/product/:id" component={() => <ProtectedRoute component={ProductDetailPage} />} />
+          {/* :sellerId is URL-encoded — it is either a numeric seller id or
+              'name:<shop>', and shop names contain spaces and slashes. */}
+          <Route path="/dashboard/brand/:sellerId" component={() => <ProtectedRoute component={BrandProfilePage} />} />
           <Route path="/dashboard/saved" component={() => <ProtectedRoute component={SavedPage} />} />
           <Route path="/dashboard/plans" component={() => <ProtectedRoute component={PlansPage} />} />
           <Route path="/dashboard/billing" component={() => <ProtectedRoute component={BillingPage} />} />

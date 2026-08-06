@@ -4,13 +4,17 @@ import {
   Command, CommandGroup, CommandItem, CommandList, CommandSeparator,
 } from '@/components/ui/command';
 import { authHeader } from '@/lib/supabase';
-import { Search, Loader2, PackageSearch, AlertCircle } from 'lucide-react';
+import { Search, Loader2, PackageSearch, AlertCircle, Store } from 'lucide-react';
 import { productDetailPath } from '@/components/ProductSearch';
 import { creatorProfilePath } from '@/components/CreatorSearch';
 
+export function brandProfilePath(sellerId: string): string {
+  return `/dashboard/brand/${encodeURIComponent(sellerId)}`;
+}
+
 const MIN_QUERY = 2;
 const DEBOUNCE_MS = 250;
-/** Per section, so both fit on screen without scrolling past the second group. */
+/** Per section, so all three fit on screen without scrolling past the last group. */
 const PER_SECTION = 6;
 
 interface ProductHit {
@@ -21,6 +25,13 @@ interface ProductHit {
   sale_price: number | null;
   sold_count: number;
   has_ranking_data: boolean;
+}
+interface BrandHit {
+  seller_id: string;
+  seller_name: string;
+  product_count: number;
+  total_sold: number;
+  niches: number;
 }
 interface CreatorHit {
   creator_key: string;
@@ -56,6 +67,7 @@ export default function GlobalSearch() {
   const [query, setQuery] = useState('');
   const [products, setProducts] = useState<ProductHit[]>([]);
   const [creators, setCreators] = useState<CreatorHit[]>([]);
+  const [brands, setBrands] = useState<BrandHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
@@ -66,7 +78,7 @@ export default function GlobalSearch() {
   useEffect(() => {
     const q = query.trim();
     if (q.length < MIN_QUERY) {
-      setProducts([]); setCreators([]);
+      setProducts([]); setCreators([]); setBrands([]);
       setLoading(false); setError(false); setRateLimited(false);
       return;
     }
@@ -76,37 +88,43 @@ export default function GlobalSearch() {
     const timer = setTimeout(async () => {
       try {
         const headers = await authHeader();
-        // Both on one debounce. suppress_miss keeps the product endpoint from
-        // logging a coverage gap before we know whether creators matched.
-        const [pRes, cRes] = await Promise.all([
+        // All three on one debounce. suppress_miss keeps the product endpoint
+        // from logging a coverage gap before we know whether creators or
+        // brands matched.
+        const [pRes, cRes, bRes] = await Promise.all([
           fetch(`/api/product-search?q=${encodeURIComponent(q)}&suppress_miss=1`, { headers }),
           fetch(`/api/creator-search?q=${encodeURIComponent(q)}`, { headers }),
+          fetch(`/api/brand-search?q=${encodeURIComponent(q)}`, { headers }),
         ]);
         if (cancelled) return;
 
-        if (pRes.status === 429 || cRes.status === 429) {
-          setRateLimited(true); setProducts([]); setCreators([]); setError(false);
+        if (pRes.status === 429 || cRes.status === 429 || bRes.status === 429) {
+          setRateLimited(true); setProducts([]); setCreators([]); setBrands([]); setError(false);
           return;
         }
-        if (!pRes.ok && !cRes.ok) throw new Error('search failed');
+        if (!pRes.ok && !cRes.ok && !bRes.ok) throw new Error('search failed');
 
-        // One side failing should not blank the other.
+        // One side failing should not blank the others.
         const pJson = pRes.ok ? await pRes.json() : { results: [] };
         const cJson = cRes.ok ? await cRes.json() : { results: [] };
+        const bJson = bRes.ok ? await bRes.json() : { results: [] };
         const p = (pJson.results || []).slice(0, PER_SECTION);
         const c = (cJson.results || []).slice(0, PER_SECTION);
-        setProducts(p); setCreators(c);
+        const br = (bJson.results || []).slice(0, PER_SECTION);
+        setProducts(p); setCreators(c); setBrands(br);
         setError(false); setRateLimited(false);
 
-        // Only now, knowing both missed, is this a real unmet need.
-        if (p.length === 0 && c.length === 0) {
+        // Only once ALL THREE sections have missed is this a real unmet need.
+        // Adding brands without extending this condition would have started
+        // logging phantom "missing product" rows for every brand-only hit.
+        if (p.length === 0 && c.length === 0 && br.length === 0) {
           void fetch(
             `/api/product-search?q=${encodeURIComponent(q)}&report_miss=1`,
             { headers },
           ).catch(() => {});
         }
       } catch {
-        if (!cancelled) { setError(true); setProducts([]); setCreators([]); }
+        if (!cancelled) { setError(true); setProducts([]); setCreators([]); setBrands([]); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -131,7 +149,7 @@ export default function GlobalSearch() {
 
   const q = query.trim();
   const showPanel = open && q.length >= MIN_QUERY;
-  const bothEmpty = products.length === 0 && creators.length === 0;
+  const allEmpty = products.length === 0 && creators.length === 0 && brands.length === 0;
 
   return (
     <div ref={boxRef} className="relative w-full max-w-xl" data-testid="global-search">
@@ -150,7 +168,7 @@ export default function GlobalSearch() {
                 e.preventDefault(); setOpen(false); inputRef.current?.blur();
               }
             }}
-            placeholder="Search products and creators"
+            placeholder="Search products, creators, brands"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
             data-testid="global-search-input"
           />
@@ -172,9 +190,9 @@ export default function GlobalSearch() {
                 </div>
               )}
 
-              {/* Fires only when BOTH sections missed — a query that finds a
-                  creator but no product is a hit, not a dead end. */}
-              {!rateLimited && !error && !loading && bothEmpty && (
+              {/* Fires only when ALL THREE sections missed — a query that finds
+                  a creator or a brand but no product is a hit, not a dead end. */}
+              {!rateLimited && !error && !loading && allEmpty && (
                 <div className="px-3 py-4" data-testid="global-search-empty">
                   <div className="flex items-center gap-2 text-xs text-foreground">
                     <PackageSearch size={13} />
@@ -222,7 +240,7 @@ export default function GlobalSearch() {
                 </CommandGroup>
               )}
 
-              {!rateLimited && !error && products.length > 0 && creators.length > 0 && (
+              {!rateLimited && !error && products.length > 0 && (creators.length > 0 || brands.length > 0) && (
                 <CommandSeparator />
               )}
 
@@ -255,6 +273,45 @@ export default function GlobalSearch() {
                       </CommandItem>
                     );
                   })}
+                </CommandGroup>
+              )}
+
+              {!rateLimited && !error && creators.length > 0 && brands.length > 0 && (
+                <CommandSeparator />
+              )}
+
+              {!rateLimited && !error && brands.length > 0 && (
+                <CommandGroup
+                  heading="Brands"
+                  className="p-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-muted-foreground"
+                >
+                  {brands.map(r => (
+                    <CommandItem
+                      key={`b-${r.seller_id}`}
+                      value={`brand-${r.seller_id}`}
+                      onSelect={() => go(brandProfilePath(r.seller_id))}
+                      className="flex items-center gap-2.5 px-2 py-2 rounded-md cursor-pointer aria-selected:bg-secondary"
+                      data-testid={`global-hit-brand-${r.seller_id}`}
+                    >
+                      {/* Brands have no image in the catalogue — a glyph tile
+                          keeps the row rhythm without inventing a logo. */}
+                      <span className="h-8 w-8 rounded bg-secondary flex items-center justify-center flex-shrink-0">
+                        <Store size={13} className="text-muted-foreground" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-foreground truncate">{r.seller_name}</div>
+                        <div className="text-[11px] text-muted-foreground truncate font-mono">
+                          {r.product_count.toLocaleString()} product{r.product_count === 1 ? '' : 's'}
+                          {r.niches > 0 && ` · ${r.niches} niche${r.niches === 1 ? '' : 's'}`}
+                        </div>
+                      </div>
+                      {r.total_sold > 0 && (
+                        <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0">
+                          {compact(r.total_sold)} sold
+                        </span>
+                      )}
+                    </CommandItem>
+                  ))}
                 </CommandGroup>
               )}
             </CommandList>

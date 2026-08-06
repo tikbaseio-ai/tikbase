@@ -6,8 +6,11 @@
  * fetches each via the ScrapeCreators product-detail endpoint with bounded
  * concurrency (max 10 in flight), then writes price/sold_count/title/seller.
  *
- * Permanently-unavailable products (404) and junk (non-numeric product_id) are
- * marked `price_unavailable = true` so future runs skip them. Resumable: a
+ * Products that 404 TWICE IN A ROW are marked `price_unavailable = true` so
+ * future runs skip them; a single 404 only records a strike, because the flag
+ * is a hard latch and one transient 404 used to be enough to set it (see
+ * pipeline/price-strikes.js). Junk (non-numeric product_id) is still marked on
+ * sight — it can never resolve, so there is nothing to confirm. Resumable: a
  * re-run only re-fetches products that are still null and not yet marked.
  *
  * Usage:
@@ -19,11 +22,13 @@
  *
  * Prerequisite for marking:
  *   ALTER TABLE products ADD COLUMN price_unavailable boolean DEFAULT false;
+ *   ALTER TABLE products ADD COLUMN price_404_strikes smallint NOT NULL DEFAULT 0;
  * If the column is absent the script still backfills prices but logs would-be
  * marks instead of writing them.
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { recordDead404s, clearStrikes, STRIKES_TO_FLAG } from "./price-strikes.js";
 
 const SCRAPECREATORS_API_KEY = process.env.SCRAPECREATORS_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -115,8 +120,14 @@ async function runPool(items, concurrency, worker, onProgress) {
   await Promise.all(Array.from({ length: concurrency }, runner));
 }
 
+// Both columns the marking path needs: the latch and the strike counter it is
+// now gated on. Missing either one disables marking rather than half-applying
+// the rule.
 async function columnExists() {
-  const { error } = await supabase.from("products").select("price_unavailable").limit(1);
+  const { error } = await supabase
+    .from("products")
+    .select("price_unavailable, price_404_strikes")
+    .limit(1);
   return !error;
 }
 
@@ -160,8 +171,9 @@ async function main() {
   const canMark = await columnExists();
   if (!canMark) {
     console.warn(
-      "  [WARN] column products.price_unavailable is MISSING — marking disabled.\n" +
+      "  [WARN] products.price_unavailable or price_404_strikes is MISSING — marking disabled.\n" +
       "         Run: ALTER TABLE products ADD COLUMN price_unavailable boolean DEFAULT false;\n" +
+      "              ALTER TABLE products ADD COLUMN price_404_strikes smallint NOT NULL DEFAULT 0;\n" +
       "         (Prices are still backfilled; 404/junk are only counted as would-be marks.)"
     );
   }
@@ -170,7 +182,9 @@ async function main() {
   console.log(`  Backlog to process this run: ${backlog.length}\n`);
 
   const stats = { attempted: 0, priced: 0, p404: 0, error: 0, skippedJunk: 0 };
-  const deadIds = []; // 404 + junk -> mark unavailable
+  const deadIds = [];  // 404 -> one strike, flagged on the second
+  const junkIds = [];  // non-numeric ids -> flagged immediately
+  const aliveIds = []; // answered -> any strike is wiped
 
   await runPool(
     backlog,
@@ -179,9 +193,10 @@ async function main() {
       stats.attempted++;
 
       // Junk (non-numeric) ids can never resolve — mark, don't call the API.
+      // Deterministic, so it needs no second opinion and skips the strike path.
       if (!isNumericId(productId)) {
         stats.skippedJunk++;
-        deadIds.push(productId);
+        junkIds.push(productId);
         return;
       }
 
@@ -212,6 +227,7 @@ async function main() {
         console.error(`  [ERROR] update ${productId}: ${error.message}`);
       } else {
         stats.priced++;
+        aliveIds.push(productId);
       }
     },
     (done, total) => {
@@ -220,7 +236,18 @@ async function main() {
     }
   );
 
-  await markUnavailable(deadIds, canMark);
+  await markUnavailable(junkIds, canMark);
+
+  // 404s: a strike each, the latch only on the second consecutive one.
+  const dead = canMark
+    ? await recordDead404s(supabase, deadIds)
+    : { flagged: 0, firstStrike: 0, error: null };
+  if (dead.error) console.error("  [ERROR] record 404 strikes:", dead.error);
+  // A product that priced successfully is alive — clear whatever it carried.
+  const revived = canMark
+    ? await clearStrikes(supabase, aliveIds)
+    : { cleared: 0, error: null };
+  if (revived.error) console.error("  [ERROR] clear 404 strikes:", revived.error);
 
   const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\n=== SUMMARY ===`);
@@ -229,7 +256,10 @@ async function main() {
   console.log(`  404:            ${stats.p404}`);
   console.log(`  error (transient): ${stats.error}`);
   console.log(`  skipped-junk:   ${stats.skippedJunk}`);
-  console.log(`  marked unavailable (404+junk): ${canMark ? deadIds.length : `0 (would mark ${deadIds.length} — column missing)`}`);
+  console.log(`  404 flagged (${STRIKES_TO_FLAG}nd strike): ${canMark ? dead.flagged : `0 (would mark — column missing)`}`);
+  console.log(`  404 first strike (retry later): ${canMark ? dead.firstStrike : stats.p404}`);
+  console.log(`  strikes cleared (priced OK):   ${revived.cleared}`);
+  console.log(`  junk marked unavailable:       ${canMark ? junkIds.length : `0 (would mark ${junkIds.length} — column missing)`}`);
   console.log(`  wall-clock:     ${secs}s  (${(stats.attempted / secs).toFixed(1)} req/s)`);
   console.log(`backfill-prices done ${new Date().toISOString()}`);
 }

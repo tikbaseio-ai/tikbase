@@ -15,6 +15,7 @@ import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDo
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { Link } from 'wouter';
+import { brandProfilePath } from '@/components/GlobalSearch';
 import { productDetailPath } from '@/components/ProductSearch';
 
 /** One window's revenue block, as merged server-side by /api/top-products. */
@@ -432,7 +433,16 @@ export default function ProductsPage() {
                                 selling, not just what. 77% of products carry it. */}
                             {product.seller_name && (
                               <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                {product.seller_name}
+                                {/* Addressed by name: these rows come from the
+                                    precomputed payload, which carries the shop
+                                    name but not its id. The API resolves it. */}
+                                <Link
+                                  href={brandProfilePath(`name:${product.seller_name}`)}
+                                  className="hover:text-[#a3ff00] transition-colors"
+                                  data-testid="product-row-brand-link"
+                                >
+                                  {product.seller_name}
+                                </Link>
                               </p>
                             )}
                             {product.product_url && (

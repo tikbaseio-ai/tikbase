@@ -82,6 +82,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         product_id: p.product_id,
         title: p.title,
         seller_name: p.seller_name ?? null,
+        // Carried so the shop name can link to its brand page. Null on 4,555
+        // of 51,963 products, where the name renders as plain text instead.
+        seller_id: p.seller_id ?? null,
         seller_tiktok_url: p.seller_tiktok_url ?? null,
         product_url: p.product_url ?? null,
         niche_slug: p.niche_slug ?? null,

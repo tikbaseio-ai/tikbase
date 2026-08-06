@@ -10,6 +10,8 @@ import thumbHandler from "../api/thumb";
 import creatorSearchHandler from "../api/creator-search";
 import creatorProfileHandler from "../api/creator-profile";
 import productSearchHandler from "../api/product-search";
+import brandSearchHandler from "../api/brand-search";
+import brandProfileHandler from "../api/brand-profile";
 import productDetailHandler from "../api/product-detail";
 import videoTranscriptHandler from "../api/video-transcript";
 
@@ -351,6 +353,26 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("creator-profile (proxy) error:", err?.message);
       if (!res.headersSent) res.status(500).json({ error: "Failed to load creator" });
+    }
+  });
+
+  // ---- Brand search (type-ahead) ----
+  app.get("/api/brand-search", async (req, res) => {
+    try {
+      await brandSearchHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("brand-search (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // ---- Brand profile ----
+  app.get("/api/brand-profile", async (req, res) => {
+    try {
+      await brandProfileHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("brand-profile (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load brand" });
     }
   });
 

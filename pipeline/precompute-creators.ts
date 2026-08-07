@@ -522,15 +522,56 @@ async function main() {
   }
 
   // Refresh the denormalised per-creator counts that creator search ranks by.
-  // Set-based UPDATE inside the database (refresh_creator_counts) — doing it as
-  // 110k client-side updates is what made the creator_key backfill take 29
-  // minutes. Non-fatal: stale counts mis-rank search slightly, which is not
-  // worth failing a leaderboard run over.
-  const { data: counted, error: countErr } = await supabase.rpc('refresh_creator_counts');
+  // Set-based UPDATE inside the database — doing it as 110k client-side updates
+  // is what made the creator_key backfill take 29 minutes.
+  //
+  // Chunked, because one call cannot finish: PostgREST runs as `authenticator`,
+  // whose statement_timeout is 8s, and the full aggregate costs 14.3s when the
+  // visibility map is stale — which is precisely its state here, right after
+  // the night's inserts. Raising the timeout from inside the function does not
+  // work (the timer is armed when the outer statement starts); the migration
+  // header records the probe. So each call takes a bounded slice of the
+  // creator_key range and returns a cursor.
+  //
+  // Still non-fatal — stale counts mis-rank search slightly, which is not worth
+  // failing a leaderboard run over — but a failure now names the chunk it died
+  // on rather than silently leaving every count a week old.
+  const countsStart = Date.now();
+  let cursor: string | null = null;
+  let chunks = 0;
+  let touched = 0;
+  let countErr: string | null = null;
+  // Bounded: 163,737 distinct keys / 2,000 per chunk is ~82 calls. The cap
+  // stops a cursor that somehow stops advancing from looping forever, and
+  // leaves room for the key count to grow.
+  const MAX_CHUNKS = 500;
+  while (chunks < MAX_CHUNKS) {
+    const { data, error } = await supabase.rpc('refresh_creator_counts', {
+      p_after: cursor,
+      p_limit: 2000,
+    });
+    if (error) { countErr = error.message; break; }
+    chunks++;
+    const res = data as { done: boolean; touched: number; last_key: string | null };
+    touched += Number(res?.touched) || 0;
+    if (res?.done) break;
+    // A cursor that does not move would spin: treat it as a failure, not a loop.
+    if (!res?.last_key || res.last_key === cursor) {
+      countErr = `cursor did not advance past ${cursor ?? 'start'}`;
+      break;
+    }
+    cursor = res.last_key;
+  }
+  const countsSecs = ((Date.now() - countsStart) / 1000).toFixed(1);
   if (countErr) {
-    console.warn(`  [WARN] refresh_creator_counts failed: ${countErr.message}`);
+    console.warn(
+      `  [WARN] refresh_creator_counts failed after ${chunks} chunk(s) ` +
+      `(${touched} rows changed, cursor ${cursor ?? 'start'}): ${countErr}`,
+    );
   } else {
-    console.log(`  creator counts refreshed: ${counted ?? 0} rows changed`);
+    console.log(
+      `  creator counts refreshed: ${touched} rows changed in ${chunks} chunk(s), ${countsSecs}s`,
+    );
   }
 
   // Warm the avatar cache for the creators that just landed in a payload. This

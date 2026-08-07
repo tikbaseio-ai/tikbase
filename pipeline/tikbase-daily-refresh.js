@@ -15,6 +15,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { deriveCreatorKey } from "../shared/creator-key.js";
+import { recordDead404s, clearStrikes, STRIKES_TO_FLAG } from "./price-strikes.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -152,6 +153,8 @@ const stats = {
   phase3_rotation_advanced: 0,
   phase3_member_max_age: 0,
   phase3_members_over_warn: 0,
+  phase3_404_flagged: 0,
+  phase3_404_first_strike: 0,
   phase3_related_inserted: 0,
   phase3_related_updated: 0,
   phase4_prices_filled: 0,
@@ -1438,15 +1441,31 @@ async function phase3(limitOverride) {
     console.log(`  Rotation cursor advanced for ${advanced} products`);
   }
 
-  // Mark permanently-unavailable (404) products so future runs skip them.
-  for (let i = 0; i < deadIds.length; i += 500) {
-    const chunk = deadIds.slice(i, i + 500);
-    const { error } = await supabase
-      .from("products")
-      .update({ price_unavailable: true })
-      .in("product_id", chunk);
-    if (error) console.error("  [ERROR] mark unavailable:", error.message);
+  // Mark permanently-unavailable products — but only on the SECOND consecutive
+  // 404. A single 404 is a strike; price_unavailable is a hard latch that drops
+  // a product from ranking and snapshotting, and one transient 404 used to be
+  // enough to set it (probes/SNAPSHOT-COVERAGE.md §8 found a live product
+  // behind the flag). Strikes live in the products table, not the fail-tracker
+  // file, because the runner is a fresh checkout every night — see
+  // pipeline/price-strikes.js.
+  const dead = await recordDead404s(supabase, deadIds);
+  if (dead.error) console.error("  [ERROR] mark unavailable:", dead.error);
+  stats.phase3_404_flagged = dead.flagged;
+  stats.phase3_404_first_strike = dead.firstStrike;
+  if (deadIds.length) {
+    console.log(
+      `  404s: ${dead.flagged} flagged unavailable (${STRIKES_TO_FLAG}nd consecutive), ` +
+      `${dead.firstStrike} on a first strike (retried next run)`
+    );
   }
+
+  // A product that answered is alive: wipe any strike it was carrying, so the
+  // two must be CONSECUTIVE rather than merely cumulative over months.
+  const revivedStrikes = await clearStrikes(supabase, written);
+  if (revivedStrikes.error)
+    console.error("  [ERROR] clear 404 strikes:", revivedStrikes.error);
+  else if (revivedStrikes.cleared)
+    console.log(`  404 strikes cleared for ${revivedStrikes.cleared} products that answered`);
 
   // Bonus payload: persist related_videos mined from the Product Details
   // responses we already paid for. Fully isolated — any failure here (including
@@ -1697,6 +1716,7 @@ async function main() {
   console.log(`  Phase 3 — Snapshots created:    ${stats.phase3_snapshots}`);
   console.log(`  Phase 3 — Rotation advanced:    ${stats.phase3_rotation_advanced}`);
   console.log(`  Phase 3 — Member max age:       ${stats.phase3_member_max_age < 0 ? "never-snapshotted present" : stats.phase3_member_max_age + "d"} (>${MEMBER_AGE_WARN_DAYS}d: ${stats.phase3_members_over_warn})`);
+  console.log(`  Phase 3 — 404 flagged/1st strike: ${stats.phase3_404_flagged} / ${stats.phase3_404_first_strike}`);
   console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);
   console.log(`  Phase 4 — Prices filled:        ${stats.phase4_prices_filled}`);

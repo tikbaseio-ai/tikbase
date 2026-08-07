@@ -1,38 +1,97 @@
-# Instructions
+# TikBase
 
-You are an autonomous coding subagent spawned by a parent agent to complete a specific task. You run unattended — there is no human in the loop and no way to ask for clarification. You must complete the task fully on your own and then exit.
+TikTok Shop analytics. Find products that are selling, the creators moving them,
+and the videos doing the work. Free tier sees a slice; Pro sees the numbers.
 
-You have two categories of skills:
+## Layout
 
-- **Coding skills** (`coding-workflow`, `commit-push-pr`, `pr-description`, `code-simplifier`, `code-review`): For repository work, writing code, git operations, pull requests, and code quality
-- **Data skills** (`data-triage`, `data-analyst`, `data-model-explorer`): For database queries, metrics, data analysis, and visualizations
-- **Repo skills** (`repo-skills`): After cloning any repo, scan for and index its skill definitions
+| path | what lives there |
+|---|---|
+| `api/*.ts` | Vercel serverless functions — one file, one endpoint, default-exported handler |
+| `server/routes.ts` | Express dev-server mirror. **Every new `api/` handler needs a route here or it 404s in dev** |
+| `client/src/pages/` | one file per route; `client/src/components/` for shared UI |
+| `shared/` | code both sides import (`resolve-tier.ts`, `creator-key.js`, `avatar-cache.ts`) |
+| `pipeline/` | nightly cron work — discovery, snapshots, precompute. Runs under bare `node` |
+| `migrations/manual/` | dated `.sql`, applied by hand. The only schema history there is |
+| `probes/` | written-up investigations. Read before re-deriving something |
 
-Load the appropriate skill based on the task. If the task involves both code and data, load both. Always load `repo-skills` after cloning a repository.
+Routing is wouter over the hash. `'/dashboard/*'`, not `'/dashboard/:rest*'` —
+the named-param form matches a single trailing segment.
 
-## Execution Rules
+## Design system
 
-- Do NOT stall. If an approach isn't working, try a different one immediately.
-- Do NOT explore the codebase endlessly. Get oriented quickly, then start making changes.
-- If a tool is missing (e.g., `rg`), use an available alternative (e.g., `grep -r`) and move on.
-- If a git operation fails, try a different approach (e.g., `gh repo clone` instead of `git clone`).
-- Stay focused on the objective. Do not go on tangents or investigate unrelated code.
-- If you are stuck after multiple retries, abort and report what went wrong rather than looping forever.
+- **Accent: violet `#a855f7`.** That is the target. The app is currently lime
+  `#a3ff00` in ~130 places; BB3 repaints it. Until then, new work uses the lime
+  token so the repaint is one mechanical pass, not a hunt.
+- **Type: IBM Plex Sans**, `IBM Plex Mono` for anything numeric. Every metric,
+  id, price, date and count is monospaced — columns of numbers must line up.
+- **No emojis.** Not in the UI, not in copy, not in commit messages.
+- Dark surface, `border-border` hairlines, `rounded-lg` cards, tabular density.
+  Match the page you are editing rather than introducing a new spacing scale.
 
-## Repo Conventions
+## Numbers must not lie
 
-After cloning any repository, immediately check for and read these files at the repo root:
-- `CLAUDE.md` — Claude Code instructions and project conventions
-- `AGENTS.md` — Agent-specific instructions
+- An absent figure is an em dash `—`, **never `$0` or `0%`**. `$0` asserts the
+  thing sold nothing; a dash says we have no figure. Different claims.
+- Paid-only fields are **omitted from the response** for free callers, not
+  zeroed or truncated. Tier comes from the bearer token via
+  `shared/resolve-tier.ts` — never from a query param.
+- Enforce limits server-side. `?limit=100&page=3` must not widen a free slice.
+- Say what a number covers when the coverage is partial ("20 of 77 products
+  modelled"), rather than presenting a subtotal as a total.
 
-Follow all instructions and conventions found in these files. They define the project's coding standards, test requirements, commit conventions, and PR expectations. If they conflict with these instructions, the repo's files take precedence.
+## Data and infrastructure
 
-## Core Rules
+- Supabase (PostgREST + pooler). **PostgREST caps every response at 1000 rows**
+  regardless of `.limit()` — page, or do the work in SQL. This has caused two
+  separate silent data bugs; assume it will cause a third.
+- `= any($1)` inside a SQL function is a parameter, so the planner cannot
+  estimate cardinality and falls back to a generic plan. Join against
+  `unnest()` instead. (100x on the product RPCs.)
+- The REST gateway cuts requests at ~10s. A function-scoped `statement_timeout`
+  does not help.
+- Trigram indexes match nothing below 3 characters — a short needle needs a
+  `text_pattern_ops` btree and a prefix query.
+- **Migrations are self-served.** Apply them yourself over
+  `SUPABASE_DB_POOLER_URL` (in `.env`), then commit the dated file to
+  `migrations/manual/` with the applied date in its header. Do not leave a
+  migration for someone else to run.
+- ScrapeCreators costs 1 credit per call. `use_ai_as_fallback` costs 10 and is
+  never sent.
 
-- Ensure all changes follow the project's coding standards (as discovered from repo convention files above)
-- NEVER approve PRs — you are not authorized to approve pull requests. Only create and comment on PRs.
-- Complete the task autonomously and create the PR(s) when done.
+## Estimation changes are invisible until the nightly precompute
 
-## Output Persistence
+Everything on the products and creators pages is served from `rankings_cache`
+and `creator_rankings`, written by `pipeline/precompute-*.ts`. Editing
+`api/top-products.ts` changes **nothing** a user sees until that precompute runs
+again.
 
-IMPORTANT: Before finishing, you MUST write your complete final response to `/tmp/claude_code_output.md` using the Write tool. This file must contain your full analysis, findings, code, or whatever the final deliverable is. This is a hard requirement — do not skip it.
+So: after an estimation change, trigger the precompute and verify against the
+rebuilt payloads. "The code is right" is not a verification. A recompute over
+all combos takes hours — start it early, and do not sit blocked on it.
+
+## Verify before you ask for a merge
+
+- `npm run check` (tsc) and `npm test` (node:test, `pipeline/*.test.js`).
+- `npm run build`, and boot `npm run dev` and load a page. Port 5000 is taken by
+  macOS AirPlay — use `PORT=5099`.
+- Curl the endpoint as **both** a free and a paid token. A tier claim without
+  two responses next to it is not evidence.
+- Check 390px. The app is used on phones; nothing may scroll sideways.
+- Screenshots and scratch scripts go in the **scratchpad**, never in the repo.
+
+Report what you measured, not what you expect. If a number surprises you,
+measure the server side before blaming it — a laptop's WAN round trip to
+Supabase is ~90ms and has already produced one false alarm.
+
+## Working here
+
+- `gh` is at `~/bin/gh`, not on `PATH`. PRs go to `tikbaseio-ai/tikbase`
+  against `master`.
+- **One task per session.** Open the PR and stop; do not merge, and do not pick
+  up the next thing because it looks adjacent.
+- Never approve a PR.
+- If another session is mid-recompute, treat `pipeline/precompute-*.ts`,
+  `api/top-products.ts`, `rankings_cache` and `creator_rankings` as off limits.
+- Comments earn their place by explaining *why* — the constraint, the measured
+  number, the bug that made the code look like this. Not what the line does.

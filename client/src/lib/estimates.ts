@@ -9,17 +9,24 @@
 // server alone, leaving this file quietly describing a model the product no
 // longer uses. Deleted rather than resynced; the server owns estimation.
 
+// null means UNKNOWN, and only ever that. The view fields go null when the
+// server could not read a product's view stats — see viewsUnknown. They are
+// never null to mean zero: a product with no videos reports 0, because the
+// query answered and the answer was none.
 export interface ProductEstimates {
-  periodViews: number;        // views from videos posted within this timeframe
-  periodVideoCount: number;   // number of videos posted within this timeframe
-  totalViews: number;         // lifetime views across all videos
-  estPeriodUnitsSold: number; // estimated units sold in this period
-  estRevenue: number;         // estimated revenue for the period
+  periodViews: number | null;        // views from videos posted within this timeframe
+  periodVideoCount: number | null;   // number of videos posted within this timeframe
+  totalViews: number | null;         // lifetime views across all videos
+  estPeriodUnitsSold: number | null; // estimated units sold in this period
+  estRevenue: number | null;         // estimated revenue for the period
   conversionRate: number | null;
   daysActive: number;
-  velocityRatio: number;      // what % of total views came from this period
+  velocityRatio: number | null;      // what % of total views came from this period
   hasRealPrice: boolean;      // true if product has a real price (not category median)
   hasRealDelta: boolean;      // true if estPeriodUnitsSold came from real snapshots
+  /** The view-stats read failed for this product. Its view fields are unknown,
+   *  not zero, and any estimate present came from a measured snapshot delta. */
+  viewsUnknown?: boolean;
 }
 
 export function formatCompactNumber(n: number): string {

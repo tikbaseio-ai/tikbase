@@ -47,6 +47,82 @@ function dailyCap(): number {
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_DAILY_CAP;
 }
 
+// Both writes below spend real money when they fail, so both get one retry.
+const WRITE_RETRY_DELAY_MS = 250;
+
+/**
+ * Give back a reserved credit. Retries once, and shouts with the video id if
+ * both attempts fail.
+ *
+ * A silent failure here is not cosmetic: the reservation stays on the ledger,
+ * so the day's cap drains without buying a single transcript. Nothing else
+ * ever decrements it. The counter read compensates for whatever still slips
+ * through — see transcript_reconcile_spend in the 2026-08-09 migration.
+ */
+export async function refundCredit(
+  supabase: SupabaseClient,
+  videoId: string,
+): Promise<{ refunded: boolean; attempts: number }> {
+  const first = await supabase.rpc('transcript_refund');
+  if (!first.error) return { refunded: true, attempts: 1 };
+
+  console.warn(`transcript: refund failed for ${videoId} (attempt 1/2): ${first.error.message} — retrying`);
+  await new Promise((r) => setTimeout(r, WRITE_RETRY_DELAY_MS));
+
+  const second = await supabase.rpc('transcript_refund');
+  if (!second.error) return { refunded: true, attempts: 2 };
+
+  console.error(
+    `transcript: REFUND FAILED TWICE video=${videoId} err=${second.error.message} — ` +
+    `one credit stays reserved on today's ledger`,
+  );
+
+  // Count the phantom so the next spend can hand back exactly this much and no
+  // more. If this write fails too, the day stays drifted — the same place we
+  // were before — and the log above already says which video did it.
+  const noted = await supabase.rpc('transcript_note_unrefunded');
+  if (noted.error) {
+    console.error(
+      `transcript: could not even record the failed refund for ${videoId}: ${noted.error.message} — ` +
+      `today's cap is now short by one credit`,
+    );
+  }
+  return { refunded: false, attempts: 2 };
+}
+
+/**
+ * Write a fetched transcript to the cache. Retries once, and shouts with the
+ * video id if both attempts fail.
+ *
+ * A silent failure here means the next click on the same video pays the vendor
+ * again for bytes we already hold — the one thing "cache permanently" exists to
+ * prevent. The caller still serves the transcript it has in hand.
+ */
+export async function cacheTranscript(
+  supabase: SupabaseClient,
+  row: Record<string, unknown>,
+): Promise<{ cached: boolean; attempts: number }> {
+  const videoId = String(row.video_id);
+  const write = () =>
+    supabase.from('video_transcripts').upsert(row as any, { onConflict: 'video_id' });
+
+  const first = await write();
+  if (!first.error) return { cached: true, attempts: 1 };
+
+  console.warn(`transcript: cache write failed for ${videoId} (attempt 1/2): ${first.error.message} — retrying`);
+  await new Promise((r) => setTimeout(r, WRITE_RETRY_DELAY_MS));
+
+  const second = await write();
+  if (!second.error) return { cached: true, attempts: 2 };
+
+  console.error(
+    `transcript: CACHE WRITE FAILED TWICE video=${videoId} err=${second.error.message} — ` +
+    `served this response but the credit bought nothing durable; the next click ` +
+    `on this video pays for it again`,
+  );
+  return { cached: false, attempts: 2 };
+}
+
 function rateLimited(key: string, now: number): boolean {
   const entry = hits.get(key);
   if (!entry || now >= entry.resetAt) {
@@ -191,10 +267,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const refund = async () => {
-      const { error } = await supabase.rpc('transcript_refund');
-      if (error) console.warn('transcript: refund failed:', error.message);
-    };
+    const refund = () => refundCredit(supabase, videoId);
 
     // 4. One plain call. use_ai_as_fallback is NEVER sent — it costs 10 credits.
     const started = Date.now();
@@ -231,19 +304,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 5a. SUCCESS.
     if (httpStatus === 200 && body?.success === true && transcript.trim()) {
       const plain = vttToPlainText(transcript);
-      const { error: insErr } = await supabase.from('video_transcripts').upsert(
-        {
-          video_id: videoId,
-          webvtt: transcript,
-          plain_text: plain,
-          status: 'ok',
-          credits_spent: charged,
-          fetched_at: new Date().toISOString(),
-        },
-        { onConflict: 'video_id' },
-      );
-      if (insErr) console.warn('transcript: cache write failed:', insErr.message);
+      const cacheWrite = await cacheTranscript(supabase, {
+        video_id: videoId,
+        webvtt: transcript,
+        plain_text: plain,
+        status: 'ok',
+        credits_spent: charged,
+        fetched_at: new Date().toISOString(),
+      });
       res.setHeader('X-Transcript-Source', 'origin');
+      // Visible in a response header rather than only in the log: a client
+      // seeing 'miss' knows this transcript is not durable yet.
+      res.setHeader('X-Transcript-Cache-Write', cacheWrite.cached ? 'ok' : 'failed');
       res.setHeader('Cache-Control', 'private, max-age=86400');
       return res.json({
         video_id: videoId,
@@ -277,17 +349,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //     costs nothing to record it accurately.
     if (httpStatus === 200 && body?.success === true) {
       const resolvedByVendor = body?.id !== undefined && body?.id !== null;
-      await supabase.from('video_transcripts').upsert(
-        {
-          video_id: videoId,
-          webvtt: null,
-          plain_text: null,
-          status: 'unavailable',
-          credits_spent: charged,
-          fetched_at: new Date().toISOString(),
-        },
-        { onConflict: 'video_id' },
-      );
+      // Same retry: an uncached 'unavailable' is paid for twice as surely as an
+      // uncached transcript.
+      await cacheTranscript(supabase, {
+        video_id: videoId,
+        webvtt: null,
+        plain_text: null,
+        status: 'unavailable',
+        credits_spent: charged,
+        fetched_at: new Date().toISOString(),
+      });
       res.setHeader('X-Transcript-Source', 'origin');
       res.setHeader('Cache-Control', 'private, max-age=86400');
       return res.json({

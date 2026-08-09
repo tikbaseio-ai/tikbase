@@ -147,24 +147,24 @@ export default function OverviewPage() {
                             </div>
                           </td>
                           <td className="py-2.5 px-3 text-right">
-                            {m.estRevenue > 0 ? (
+                            {(m.estRevenue ?? 0) > 0 ? (
                               // Same confidence marker as the products table, so
                               // a number does not look more solid here than it
                               // does there.
                               <span className="inline-flex items-center justify-end gap-1.5">
                                 <ConfidenceDot hasRealDelta={m.hasRealDelta} hasRealPrice={m.hasRealPrice} />
-                                <span className="font-mono text-xs font-semibold text-[#a3ff00]">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue)}</span>
+                                <span className="font-mono text-xs font-semibold text-[#a3ff00]">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue!)}</span>
                               </span>
                             ) : (
                               <span className="text-zinc-500 text-xs">—</span>
                             )}
                           </td>
                           <td className="py-2.5 px-3 text-right">
-                            <span className="font-mono text-xs text-foreground">{m.hasRealDelta ? '' : '≈ '}{m.estPeriodUnitsSold.toLocaleString()}</span>
+                            <span className="font-mono text-xs text-foreground">{m.estPeriodUnitsSold == null ? '—' : `${m.hasRealDelta ? '' : '≈ '}${m.estPeriodUnitsSold.toLocaleString()}`}</span>
                           </td>
                           <td className="py-2.5 px-3 text-right">
                             <span className="font-mono text-xs text-foreground">
-                              {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (m.totalViews > 0 ? formatCompactNumber(m.totalViews) : '--')}
+                              {(m.periodViews ?? 0) > 0 ? formatCompactNumber(m.periodViews!) : ((m.totalViews ?? 0) > 0 ? formatCompactNumber(m.totalViews!) : '--')}
                             </span>
                           </td>
                         </tr>

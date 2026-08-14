@@ -7,7 +7,7 @@ function scrollTo(id: string) {
 export default function LandingPage() {
   return (
     <div
-      className="min-h-screen selection:bg-[#ddffaf] selection:text-[#3f6600]"
+      className="min-h-screen selection:bg-primary selection:text-primary-foreground"
       style={{ backgroundColor: '#0e0e10', color: '#f9f5f8', fontFamily: "'Inter', sans-serif" }}
     >
       {/* TopNavBar */}
@@ -15,13 +15,13 @@ export default function LandingPage() {
         <div className="flex justify-between items-center px-8 h-20 max-w-7xl mx-auto w-full">
           <div className="text-white font-black text-xl tracking-tighter">TikBase</div>
           <div className="hidden md:flex items-center gap-8 font-['Space_Grotesk'] text-sm tracking-tight">
-            <button onClick={() => scrollTo('features')} className="text-[#ddffaf] font-bold transition-colors duration-300 bg-transparent border-none cursor-pointer">Features</button>
-            <button onClick={() => scrollTo('pricing')} className="text-neutral-400 hover:text-[#ddffaf] transition-colors duration-300 bg-transparent border-none cursor-pointer">Pricing</button>
-            <button onClick={() => scrollTo('faq')} className="text-neutral-400 hover:text-[#ddffaf] transition-colors duration-300 bg-transparent border-none cursor-pointer">FAQ</button>
+            <button onClick={() => scrollTo('features')} className="text-primary font-bold transition-colors duration-300 bg-transparent border-none cursor-pointer">Features</button>
+            <button onClick={() => scrollTo('pricing')} className="text-neutral-400 hover:text-primary transition-colors duration-300 bg-transparent border-none cursor-pointer">Pricing</button>
+            <button onClick={() => scrollTo('faq')} className="text-neutral-400 hover:text-primary transition-colors duration-300 bg-transparent border-none cursor-pointer">FAQ</button>
           </div>
           <div className="flex items-center gap-4">
-            <Link href="/login" className="text-neutral-400 font-['Space_Grotesk'] text-sm hover:text-[#ddffaf] transition-colors duration-300 no-underline">Log in</Link>
-            <Link href="/signup" className="bg-[#ddffaf] text-[#3f6600] px-6 py-2.5 rounded-full font-['Space_Grotesk'] text-sm font-bold hover:brightness-110 active:scale-95 transition-all no-underline inline-block">Start Free Trial</Link>
+            <Link href="/login" className="text-neutral-400 font-['Space_Grotesk'] text-sm hover:text-primary transition-colors duration-300 no-underline">Log in</Link>
+            <Link href="/signup" className="bg-primary text-primary-foreground px-6 py-2.5 rounded-full font-['Space_Grotesk'] text-sm font-bold hover:brightness-110 active:scale-95 transition-all no-underline inline-block">Start Free Trial</Link>
           </div>
         </div>
       </nav>
@@ -37,13 +37,13 @@ export default function LandingPage() {
               TikBase gives TikTok affiliate creators real-time product and video intelligence — so you promote winners, not guesses.
             </p>
             <div className="flex flex-col items-center gap-4">
-              <Link href="/signup" className="bg-[#ddffaf] text-[#3f6600] px-10 py-5 rounded-full font-['Space_Grotesk'] text-lg font-bold hover:brightness-110 active:scale-95 transition-all no-underline inline-block" style={{ boxShadow: '0 0 40px rgba(221,255,175,0.15)' }}>
+              <Link href="/signup" className="bg-primary text-primary-foreground px-10 py-5 rounded-full font-['Space_Grotesk'] text-lg font-bold hover:brightness-110 active:scale-95 transition-all no-underline inline-block" style={{ boxShadow: '0 0 40px rgba(221,255,175,0.15)' }}>
                 Start Your 7-Day Free Trial
               </Link>
               <span className="font-['IBM_Plex_Mono'] text-xs text-[#767577] tracking-wider">$44.99/mo · Cancel anytime</span>
             </div>
             <div className="relative w-full max-w-6xl mx-auto mt-16" style={{ perspective: '1000px' }}>
-              <div className="absolute -inset-10 bg-[#ddffaf]/20 blur-[120px] rounded-full -z-10" />
+              <div className="absolute -inset-10 bg-primary/20 blur-[120px] rounded-full -z-10" />
               <div className="relative rounded-lg overflow-hidden transform shadow-2xl border border-[#48474a]/20" style={{ boxShadow: '0 0 80px -20px rgba(163,255,0,0.3)' }}>
                 <img
                   alt="SaaS Dashboard Interface"
@@ -83,29 +83,29 @@ export default function LandingPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="md:col-span-2 bg-[#19191c] rounded-lg p-10 hover:bg-[#2c2c2f] transition-colors group">
-                <span className="material-symbols-outlined text-[#ddffaf] text-4xl mb-8 block">trending_up</span>
+                <span className="material-symbols-outlined text-primary text-4xl mb-8 block">trending_up</span>
                 <h3 className="font-['Space_Grotesk'] text-2xl font-bold mb-4 text-white">Top Products Leaderboard</h3>
                 <p className="text-[#adaaad] leading-relaxed">Instantly access the highest converting TikTok Shop items across every category.</p>
               </div>
               <div className="md:col-span-2 bg-[#19191c] rounded-lg p-10 hover:bg-[#2c2c2f] transition-colors group">
-                <span className="material-symbols-outlined text-[#ddffaf] text-4xl mb-8 block">play_circle</span>
+                <span className="material-symbols-outlined text-primary text-4xl mb-8 block">play_circle</span>
                 <h3 className="font-['Space_Grotesk'] text-2xl font-bold mb-4 text-white">Viral Video Rankings</h3>
                 <p className="text-[#adaaad] leading-relaxed">Analyze the hooks and structures of videos that are actually generating sales.</p>
               </div>
               <div className="md:col-span-1 bg-[#19191c] rounded-lg p-8 hover:bg-[#2c2c2f] transition-colors">
-                <span className="material-symbols-outlined text-[#ddffaf] text-3xl mb-6 block">bolt</span>
+                <span className="material-symbols-outlined text-primary text-3xl mb-6 block">bolt</span>
                 <h3 className="font-['Space_Grotesk'] text-xl font-bold mb-3 text-white">Real-Time Data</h3>
                 <p className="text-[#adaaad] text-sm leading-relaxed">Minute-by-minute updates on sales velocity.</p>
               </div>
               <div className="md:col-span-3 bg-[#19191c] rounded-lg p-8 hover:bg-[#2c2c2f] transition-colors flex items-center gap-8">
                 <div className="flex-shrink-0">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-4xl">category</span>
+                  <span className="material-symbols-outlined text-primary text-4xl">category</span>
                 </div>
                 <div>
                   <h3 className="font-['Space_Grotesk'] text-xl font-bold mb-2 text-white">18 Niches Covered</h3>
                   <p className="text-[#adaaad] text-sm leading-relaxed">From beauty to tech gadgets, we track everything so you don't have to.</p>
                 </div>
-                <div className="hidden md:flex ml-auto font-['IBM_Plex_Mono'] text-[#ddffaf] text-3xl font-bold">18</div>
+                <div className="hidden md:flex ml-auto font-['IBM_Plex_Mono'] text-primary text-3xl font-bold">18</div>
               </div>
             </div>
           </div>
@@ -116,7 +116,7 @@ export default function LandingPage() {
           <div className="max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row items-end justify-between gap-8 mb-16">
               <h2 className="font-['Space_Grotesk'] text-4xl md:text-5xl font-bold max-w-xl">Built for creators who take TikTok Shop seriously</h2>
-              <span className="font-['IBM_Plex_Mono'] text-[#ddffaf] text-sm tracking-widest uppercase mb-2">Internal Alpha Access</span>
+              <span className="font-['IBM_Plex_Mono'] text-primary text-sm tracking-widest uppercase mb-2">Internal Alpha Access</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="rounded-lg overflow-hidden bg-[#19191c] shadow-xl">
@@ -153,11 +153,11 @@ export default function LandingPage() {
               </div>
               <ul className="space-y-4 mb-12 text-left list-none p-0">
                 <li className="flex items-center gap-3 text-sm text-[#adaaad]">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Top 5 Daily Products
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#adaaad]">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Limited Video Rankings
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#adaaad] opacity-50">
@@ -170,8 +170,8 @@ export default function LandingPage() {
               </Link>
             </div>
             {/* Pro Plan */}
-            <div className="bg-[#19191c] rounded-lg p-12 flex flex-col relative border-2 border-[#ddffaf]" style={{ boxShadow: '0 0 50px rgba(221,255,175,0.1)' }}>
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-[#ddffaf] text-[#3f6600] px-4 py-1 rounded-full text-[10px] uppercase tracking-widest font-bold">
+            <div className="bg-[#19191c] rounded-lg p-12 flex flex-col relative border-2 border-primary" style={{ boxShadow: '0 0 50px rgba(221,255,175,0.1)' }}>
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-1 rounded-full text-[10px] uppercase tracking-widest font-bold">
                 Most Popular
               </div>
               <span className="font-['Space_Grotesk'] text-xl font-bold mb-2">Pro</span>
@@ -180,29 +180,29 @@ export default function LandingPage() {
                   <span className="font-['IBM_Plex_Mono'] text-4xl font-bold text-white">$44.99</span>
                   <span className="text-[#adaaad] text-sm">/mo</span>
                 </div>
-                <div className="bg-[#a3ff00]/10 border border-[#a3ff00]/20 px-3 py-1.5 rounded-full">
-                  <span className="text-[#a3ff00] font-bold text-[13px] font-['Space_Grotesk'] tracking-tight whitespace-nowrap">$31.49/mo (billed yearly) — Save 30%</span>
+                <div className="bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full">
+                  <span className="text-primary font-bold text-[13px] font-['Space_Grotesk'] tracking-tight whitespace-nowrap">$31.49/mo (billed yearly) — Save 30%</span>
                 </div>
               </div>
               <ul className="space-y-4 mb-12 text-left list-none p-0">
                 <li className="flex items-center gap-3 text-sm">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Unlimited Product Access
                 </li>
                 <li className="flex items-center gap-3 text-sm">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Full Video Hooks Library
                 </li>
                 <li className="flex items-center gap-3 text-sm">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Real-Time Sales Tracker
                 </li>
                 <li className="flex items-center gap-3 text-sm">
-                  <span className="material-symbols-outlined text-[#ddffaf] text-lg">check</span>
+                  <span className="material-symbols-outlined text-primary text-lg">check</span>
                   Priority Niche Support
                 </li>
               </ul>
-              <Link href="/signup" className="mt-auto w-full py-4 rounded-full bg-[#ddffaf] text-[#3f6600] font-['Space_Grotesk'] font-bold hover:brightness-110 active:scale-95 transition-all text-center no-underline inline-block">
+              <Link href="/signup" className="mt-auto w-full py-4 rounded-full bg-primary text-primary-foreground font-['Space_Grotesk'] font-bold hover:brightness-110 active:scale-95 transition-all text-center no-underline inline-block">
                 Start 7-Day Free Trial
               </Link>
             </div>
@@ -235,15 +235,15 @@ export default function LandingPage() {
 
         {/* Final CTA */}
         <section className="py-32 px-8">
-          <div className="max-w-5xl mx-auto bg-[#ddffaf] rounded-lg p-16 md:p-24 text-center relative overflow-hidden">
+          <div className="max-w-5xl mx-auto bg-primary rounded-lg p-16 md:p-24 text-center relative overflow-hidden">
             <div className="relative z-10">
-              <h2 className="font-['Space_Grotesk'] text-4xl md:text-6xl font-bold text-[#3f6600] mb-8 tracking-tight">Stop guessing. Start promoting winners.</h2>
+              <h2 className="font-['Space_Grotesk'] text-4xl md:text-6xl font-bold text-primary-foreground mb-8 tracking-tight">Stop guessing. Start promoting winners.</h2>
               <Link href="/signup" className="bg-[#0e0e10] text-[#f9f5f8] px-12 py-5 rounded-full font-['Space_Grotesk'] text-xl font-bold hover:opacity-90 transition-opacity active:scale-95 no-underline inline-block">
                 Get Started Now
               </Link>
             </div>
-            <div className="absolute top-0 right-0 w-64 h-64 bg-[#3f6600]/10 rounded-full blur-3xl -mr-32 -mt-32" />
-            <div className="absolute bottom-0 left-0 w-64 h-64 bg-[#3f6600]/10 rounded-full blur-3xl -ml-32 -mb-32" />
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary-foreground/10 rounded-full blur-3xl -mr-32 -mt-32" />
+            <div className="absolute bottom-0 left-0 w-64 h-64 bg-primary-foreground/10 rounded-full blur-3xl -ml-32 -mb-32" />
           </div>
         </section>
       </main>

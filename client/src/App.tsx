@@ -56,7 +56,7 @@ function DashboardLayout() {
   }, [navOpen]);
 
   return (
-    <div className="flex min-h-screen" style={{ backgroundColor: '#0a0a0c' }}>
+    <div className="flex min-h-screen bg-background">
       <AppSidebar open={navOpen} onClose={() => setNavOpen(false)} />
       {/* min-w-0 lets the overflow-x-auto table wrappers actually scroll: a flex
           item defaults to min-width:auto, which lets a wide table push the whole
@@ -80,8 +80,7 @@ function DashboardLayout() {
           </button>
           <Link href="/dashboard" className="md:hidden flex items-center gap-2 no-underline flex-shrink-0">
             <div
-              className="w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-xs"
-              style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+              className="w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-xs bg-primary text-primary-foreground"
             >
               TB
             </div>

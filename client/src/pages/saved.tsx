@@ -13,7 +13,7 @@ export default function SavedPage() {
   } = useBookmarks();
 
   return (
-    <div className="p-4 md:p-6" data-testid="saved-page">
+    <div className="p-5 md:p-8" data-testid="saved-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Saved</h1>
         <p className="text-sm text-muted-foreground">
@@ -27,10 +27,9 @@ export default function SavedPage() {
           onClick={() => setTab('videos')}
           className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
             tab === 'videos'
-              ? 'text-[#0a0a0c]'
+              ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
-          style={tab === 'videos' ? { backgroundColor: '#a3ff00' } : undefined}
           data-testid="tab-videos"
         >
           Videos ({savedVideos.length})
@@ -39,10 +38,9 @@ export default function SavedPage() {
           onClick={() => setTab('products')}
           className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
             tab === 'products'
-              ? 'text-[#0a0a0c]'
+              ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
-          style={tab === 'products' ? { backgroundColor: '#a3ff00' } : undefined}
           data-testid="tab-products"
         >
           Products ({savedProducts.length})
@@ -115,8 +113,8 @@ export default function SavedPage() {
                     {video.product && (
                       <div className="pt-2 border-t border-border">
                         <div className="flex items-center gap-1 mb-1">
-                          <ShoppingBag size={10} className="text-[#a3ff00]" />
-                          <span className="text-[10px] font-mono font-semibold tracking-wider text-[#a3ff00] uppercase">
+                          <ShoppingBag size={10} className="text-primary" />
+                          <span className="text-[10px] font-mono font-semibold tracking-wider text-primary uppercase">
                             Product
                           </span>
                         </div>
@@ -169,7 +167,7 @@ export default function SavedPage() {
                       <span className="text-xs font-mono text-muted-foreground">
                         {(product.sold_count || 0).toLocaleString()} sold
                       </span>
-                      <span className="text-xs font-mono text-[#a3ff00]">
+                      <span className="text-xs font-mono text-primary">
                         ${(product.sale_price || 0).toFixed(2)}
                       </span>
                     </div>

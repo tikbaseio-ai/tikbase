@@ -33,7 +33,7 @@ export function ConfidenceDot({
     <span
       title={title}
       className="inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 cursor-help"
-      style={{ backgroundColor: hasRealDelta ? '#a3ff00' : '#f59e0b' }}
+      style={{ backgroundColor: hasRealDelta ? 'hsl(var(--primary))' : 'hsl(var(--warning))' }}
       data-testid={`confidence-${hasRealDelta ? 'measured' : 'modeled'}`}
     />
   );

@@ -46,7 +46,7 @@ export function OnboardingBanner() {
   };
 
   return (
-    <div className="relative mb-6 rounded-lg border border-[#a3ff00]/25 bg-[#a3ff00]/[0.04] p-4">
+    <div className="relative mb-6 rounded-lg border border-primary/25 bg-primary/[0.04] p-4">
       <button
         onClick={close}
         aria-label="Dismiss"
@@ -57,8 +57,7 @@ export function OnboardingBanner() {
 
       <div className="flex items-center gap-2 mb-3">
         <span
-          className="w-6 h-6 rounded-md flex items-center justify-center font-mono font-bold text-[11px]"
-          style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+          className="w-6 h-6 rounded-md flex items-center justify-center font-mono font-bold text-[11px] bg-primary text-primary-foreground"
         >
           TB
         </span>
@@ -72,7 +71,7 @@ export function OnboardingBanner() {
           <div key={step.title} className="flex gap-2.5">
             <step.icon
               size={16}
-              className="mt-0.5 flex-shrink-0 text-[#a3ff00]"
+              className="mt-0.5 flex-shrink-0 text-primary"
               strokeWidth={2}
             />
             <div>

@@ -63,7 +63,7 @@ function StatCard({
   muted?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
+    <div className="rounded-lg border border-border bg-card px-5 py-4">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
         {icon}
         <span>{label}</span>
@@ -129,7 +129,7 @@ export default function BrandProfilePage() {
     : 1;
 
   return (
-    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+    <div className="p-5 md:p-8 max-w-[1400px] mx-auto">
       <Link
         href="/dashboard/products"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
@@ -167,12 +167,12 @@ export default function BrandProfilePage() {
         <>
           {/* Identity. Brands carry no logo in the catalogue, so the tile is a
               glyph rather than a broken image. */}
-          <div className="flex items-start gap-4 mb-6">
-            <div className="h-16 w-16 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
-              <Store size={24} className="text-muted-foreground" />
+          <div className="flex items-start gap-5 mb-8">
+            <div className="h-20 w-20 md:h-24 md:w-24 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0">
+              <Store size={30} className="text-muted-foreground" />
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-xl font-semibold text-foreground break-words" data-testid="brand-profile-name">
+              <h1 className="text-2xl font-semibold text-foreground break-words tracking-tight" data-testid="brand-profile-name">
                 {name}
               </h1>
               {b.seller_tiktok_url ? (
@@ -180,7 +180,7 @@ export default function BrandProfilePage() {
                   href={b.seller_tiktok_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-[#a3ff00] transition-colors"
+                  className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-primary transition-colors"
                   data-testid="brand-profile-tiktok"
                 >
                   Shop on TikTok
@@ -203,7 +203,7 @@ export default function BrandProfilePage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <StatCard
               label="Products" icon={<Package size={11} />}
               value={b.product_count.toLocaleString()}
@@ -260,10 +260,10 @@ export default function BrandProfilePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-card/50 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="text-left font-medium py-2.5 pl-4 pr-2">Product</th>
-                    <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Price</th>
-                    <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Sold</th>
-                    <th className="text-right font-medium py-2.5 px-4 whitespace-nowrap">
+                    <th className="text-left font-medium py-3 pl-5 pr-3">Product</th>
+                    <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Price</th>
+                    <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Sold</th>
+                    <th className="text-right font-medium py-3 px-5 whitespace-nowrap">
                       {isPaid ? 'Est. GMV 30d' : 'Est. GMV'}
                     </th>
                   </tr>
@@ -271,13 +271,13 @@ export default function BrandProfilePage() {
                 <tbody data-testid="brand-profile-products">
                   {data.products.map(p => (
                     <tr key={p.product_id} className="border-b border-border/60 last:border-0">
-                      <td className="py-2.5 pl-4 pr-2">
+                      <td className="py-3.5 pl-5 pr-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <img
                             src={p.image_url}
                             alt=""
                             loading="lazy"
-                            className="h-9 w-9 rounded object-cover bg-secondary flex-shrink-0"
+                            className="h-12 w-12 rounded-md object-cover bg-secondary flex-shrink-0"
                             onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
                           />
                           {/* Bounded so a 200-character title cannot push the
@@ -285,7 +285,7 @@ export default function BrandProfilePage() {
                           <div className="min-w-0 max-w-[520px]">
                             <Link
                               href={productDetailPath(p.product_id)}
-                              className="text-xs text-foreground hover:text-[#a3ff00] transition-colors line-clamp-2 leading-snug"
+                              className="text-xs text-foreground hover:text-primary transition-colors line-clamp-2 leading-snug"
                               data-testid={`brand-product-${p.product_id}`}
                             >
                               {p.title || p.product_id}
@@ -296,14 +296,14 @@ export default function BrandProfilePage() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground whitespace-nowrap">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground whitespace-nowrap">
                         {p.sale_price != null && p.sale_price > 0 ? `$${p.sale_price.toFixed(2)}` : '—'}
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground whitespace-nowrap">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground whitespace-nowrap">
                         {formatViews(p.sold_count)}
                       </td>
                       <td
-                        className={`py-2.5 px-4 text-right font-mono text-xs whitespace-nowrap ${
+                        className={`py-3.5 px-5 text-right font-mono text-xs whitespace-nowrap ${
                           p.gmv30d ? 'text-foreground' : 'text-muted-foreground'
                         }`}
                       >
@@ -321,10 +321,10 @@ export default function BrandProfilePage() {
           {!isPaid && data.productsTotal > data.products.length ? (
             <button
               onClick={() => showPaywall('brand_profile_products')}
-              className="w-full mb-6 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mb-6 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-brand-products"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground text-left">
                 Unlock all {data.productsTotal.toLocaleString()} products from {name} and
                 their modeled GMV

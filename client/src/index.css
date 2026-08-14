@@ -18,16 +18,37 @@
   --sidebar: 240 10% 5%;
   --sidebar-foreground: 0 0% 95%;
   --sidebar-border: 240 5% 12%;
-  --sidebar-primary: 82 100% 50%;
-  --sidebar-primary-foreground: 0 0% 4%;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: 240 5% 12%;
   --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-ring: 82 100% 50%;
+  --sidebar-ring: var(--primary);
   --popover: 240 8% 8%;
   --popover-foreground: 0 0% 95%;
   --popover-border: 240 5% 14%;
-  --primary: 82 100% 50%;
-  --primary-foreground: 0 0% 4%;
+  /* ------------------------------------------------------------------
+     BRAND ACCENT. Change these three lines and the whole app repaints —
+     every accent in the UI resolves here, and no component carries a
+     colour literal. (It used to: 132 hardcoded lime hex literals
+     spread across 20 files.)
+
+     --primary is the fill: buttons, active pills, rank chips, the logo
+     mark, the confidence dot. Measured on #0a0a0c it reads 5.00:1, and
+     near-black on top of it reads 5.00:1 as well — white would be only
+     3.96:1, which is why the foreground stays dark.
+
+     --primary-bright is the same hue lifted for SMALL TEXT SITTING ON A
+     PRIMARY TINT. #a855f7 text on bg-primary/10 measures 4.42:1, under
+     the 4.5:1 floor, and the Opportunity badge that uses it is 9px. At
+     72% lightness the same pairing is 5.74:1. Fills do not need it;
+     9-10px text on a tinted chip does.
+     ------------------------------------------------------------------ */
+  --primary: 271 91% 65%;
+  --primary-foreground: 240 10% 4%;
+  --primary-bright: 271 91% 72%;
+  /* Amber, for the "modelled, not measured" half of the confidence dot.
+     Was a literal in ConfidenceDot.tsx. */
+  --warning: 38 92% 50%;
   --secondary: 240 5% 12%;
   --secondary-foreground: 0 0% 95%;
   --muted: 240 5% 14%;
@@ -37,8 +58,8 @@
   --destructive: 0 84% 42%;
   --destructive-foreground: 0 0% 98%;
   --input: 240 5% 20%;
-  --ring: 82 100% 50%;
-  --chart-1: 82 100% 50%;
+  --ring: var(--primary);
+  --chart-1: var(--primary);
   --chart-2: 173 58% 55%;
   --chart-3: 262 83% 68%;
   --chart-4: 43 74% 65%;
@@ -86,7 +107,6 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    background-color: #0a0a0c;
   }
 }
 
@@ -104,17 +124,6 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
-}
-
-/* Lime accent utility */
-.text-lime {
-  color: #a3ff00;
-}
-.bg-lime {
-  background-color: #a3ff00;
-}
-.border-lime {
-  border-color: #a3ff00;
 }
 
 @layer utilities {

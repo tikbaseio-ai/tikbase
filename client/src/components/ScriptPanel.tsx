@@ -134,7 +134,7 @@ export function ScriptButton({
                 <a
                   href={videoUrl}
                   target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-[#a3ff00] transition-colors"
+                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors"
                 >
                   <ExternalLink size={10} /> Watch
                 </a>
@@ -144,7 +144,7 @@ export function ScriptButton({
                 className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors bg-transparent cursor-pointer"
                 data-testid="script-copy"
               >
-                {copied ? <Check size={10} className="text-[#a3ff00]" /> : <Copy size={10} />}
+                {copied ? <Check size={10} className="text-primary" /> : <Copy size={10} />}
                 {copied ? 'Copied' : 'Copy all'}
               </button>
             </div>
@@ -184,7 +184,7 @@ export function ScriptButton({
         className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors bg-transparent ${
           unavailable
             ? 'border-border text-zinc-600 cursor-not-allowed'
-            : 'border-border text-muted-foreground hover:text-[#a3ff00] hover:border-[#a3ff00]/40 cursor-pointer'
+            : 'border-border text-muted-foreground hover:text-primary hover:border-primary/40 cursor-pointer'
         }`}
         data-testid={`script-button-${videoId ?? 'none'}`}
       >

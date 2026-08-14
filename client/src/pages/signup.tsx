@@ -72,7 +72,7 @@ export default function SignupPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-[#ddffaf]/40 transition-colors"
+                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-primary/40 transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -84,7 +84,7 @@ export default function SignupPage() {
                 onChange={e => setPassword(e.target.value)}
                 required
                 minLength={6}
-                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-[#ddffaf]/40 transition-colors"
+                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-primary/40 transition-colors"
                 placeholder="At least 6 characters"
               />
             </div>
@@ -93,13 +93,13 @@ export default function SignupPage() {
               <p className="text-[#ff7351] text-sm">{error}</p>
             )}
             {success && (
-              <p className="text-[#ddffaf] text-sm">{success}</p>
+              <p className="text-primary text-sm">{success}</p>
             )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-full bg-[#ddffaf] text-[#3f6600] font-['Space_Grotesk'] font-bold text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-none"
+              className="w-full py-3 rounded-full bg-primary text-primary-foreground font-['Space_Grotesk'] font-bold text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-none"
             >
               {loading ? 'Creating account...' : 'Create account'}
             </button>
@@ -108,7 +108,7 @@ export default function SignupPage() {
 
         <p className="text-center mt-6 text-[#adaaad] text-sm">
           Already have an account?{' '}
-          <Link href="/login" className="text-[#ddffaf] font-medium no-underline hover:underline">Log in</Link>
+          <Link href="/login" className="text-primary font-medium no-underline hover:underline">Log in</Link>
         </p>
       </div>
     </div>

@@ -12,7 +12,7 @@
  * So this runs at the end of the nightly creator precompute, over the creators
  * that actually render (top N of each niche x window payload, deduped — a few
  * hundred, not the 110k tail), and writes through the same storage path
- * api/avatar reads (shared/avatar-cache.ts).
+ * api/avatar reads (api/_lib/avatar-cache.ts).
  *
  * Costs ZERO ScrapeCreators credits: these are plain CDN image fetches plus
  * Supabase Storage writes. It never throws and never fails the run — a cold
@@ -37,7 +37,7 @@ import {
   isSignedUrlLive,
   listCachedAvatars,
   signedUrlExpiryMs,
-} from '../shared/avatar-cache';
+} from '../api/_lib/avatar-cache.js';
 
 /** How deep into each niche x window payload to warm. The page shows 50/page. */
 export const WARM_TOP_N_PER_PAYLOAD = 50;

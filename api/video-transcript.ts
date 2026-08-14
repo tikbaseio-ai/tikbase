@@ -21,7 +21,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { resolveTier } from '../shared/resolve-tier';
+import { resolveTier } from './_lib/resolve-tier.js';
 
 const API_BASE = 'https://api.scrapecreators.com';
 const FETCH_TIMEOUT_MS = 20_000; // vendor measured at 5.6-6.8s; leave headroom

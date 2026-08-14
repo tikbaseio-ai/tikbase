@@ -1,0 +1,83 @@
+name: Production smoke check
+
+# Why this exists.
+#
+# Between 2026-08-06 and 2026-08-14 production served a site that looked fine
+# and had six dead endpoints. Every api/* function that imported from shared/
+# crashed on cold start with ERR_MODULE_NOT_FOUND, the deployment stayed READY,
+# and nothing said a word — the header search, creator profiles, product detail
+# pages and every avatar were down for eight days.
+#
+# Nothing here talks to the database, spends a credit, or needs a secret. It
+# asks production the only question that matters: does each endpoint answer?
+
+on:
+  schedule:
+    - cron: "20 * * * *" # hourly, twenty past
+  workflow_dispatch:
+  # After a deploy lands on master, so a broken bundle is caught in minutes
+  # rather than by a user.
+  push:
+    branches: [master]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe every public endpoint
+        run: |
+          BASE="${BASE_URL:-https://tikbase.io}"
+          echo "Probing $BASE"
+
+          # endpoint|expected status(es). One entry per serverless function that
+          # can be reached with a GET and no auth. The free tier answers all of
+          # them, so an anonymous probe is a fair test.
+          CASES=(
+            "/|200"
+            "/api/top-products?niche=all&days=7&limit=2|200"
+            "/api/top-creators?niche=all&days=30&limit=2|200"
+            "/api/top-videos?niche=all&days=7&limit=2|200"
+            "/api/product-search?q=serum|200"
+            "/api/creator-search?q=hay|200"
+            "/api/brand-search?q=med|200"
+            "/api/product-detail?id=1729508370969629931|200"
+            "/api/creator-profile?key=hayliesfaves|200"
+            "/api/brand-profile?seller_id=7495514739648989419|200"
+            "/api/check-subscription|200"
+            "/api/thumb?product_id=1729508370969629931|200,302"
+            "/api/avatar?key=hayliesfaves|200,302"
+          )
+
+          fail=0
+          for case in "${CASES[@]}"; do
+            path="${case%%|*}"
+            want="${case##*|}"
+            code=$(curl -s -o /tmp/body -w "%{http_code}" -m 45 "$BASE$path" || echo "000")
+            if [[ ",$want," == *",$code,"* ]]; then
+              printf "  ok    %-6s %s\n" "$code" "$path"
+            else
+              printf "  FAIL  %-6s %s  (wanted %s)\n" "$code" "$path" "$want"
+              head -c 200 /tmp/body | sed 's/^/          /'
+              echo
+              fail=1
+            fi
+          done
+
+          # A deployment can be READY with functions that crash on every
+          # invocation, so a green deploy is not evidence. This is.
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Production has failing endpoints — see the FAIL lines above"
+            exit 1
+          fi
+          echo "All endpoints answered."
+
+      - name: Confirm the deployed bundle is not stale
+        run: |
+          BASE="${BASE_URL:-https://tikbase.io}"
+          # The asset filename is a content hash of the client build, so if the
+          # deployed one no longer matches what master builds, production is
+          # behind. Reported, not failed: a deploy in flight is not an incident.
+          asset=$(curl -s -m 30 "$BASE" | grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' | head -1)
+          echo "deployed bundle: $asset"
+          curl -s -I -m 30 "$BASE$asset" | grep -i "^last-modified" || true

@@ -14,7 +14,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { resolveTier } from '../shared/resolve-tier';
+import { resolveTier } from './_lib/resolve-tier.js';
 
 const MIN_QUERY = 2;
 const MAX_RESULTS = 20;

@@ -1,6 +1,10 @@
 /**
  * The three WARN-and-continue sites, each with its failure simulated.
  *
+ * Lives in tests/, not api/: everything under api/ is deployed as a serverless
+ * function, so this file was being published as an endpoint at
+ * /api/warn-and-continue.test — one that imports node:test and cannot run.
+ *
  * Run with `npm test`. No network, no database: every case drives the real
  * exported function against a fake Supabase that fails on demand, because the
  * behaviour under test only happens when something breaks.
@@ -16,8 +20,8 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchViewStats, rpcWithRetry } from './top-products';
-import { refundCredit, cacheTranscript } from './video-transcript';
+import { fetchViewStats, rpcWithRetry } from '../api/top-products';
+import { refundCredit, cacheTranscript } from '../api/video-transcript';
 
 /** Fake PostgREST. `failures` is per-rpc-name: how many calls fail first. */
 function fakeSupabase(opts: {

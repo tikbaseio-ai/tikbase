@@ -11,7 +11,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { resolveTier } from '../shared/resolve-tier';
+import { resolveTier } from './_lib/resolve-tier.js';
 
 // Free sees enough to judge the brand, then the upsell. Enforced HERE so
 // ?limit= and ?page= cannot widen it.

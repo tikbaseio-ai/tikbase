@@ -13,7 +13,7 @@
 // Keyed on creator_key rather than the URL because the key is stable while the
 // signed URL rotates — caching by URL would store a new copy on every refresh.
 //
-// The storage layout and the write itself live in shared/avatar-cache.ts,
+// The storage layout and the write itself live in api/_lib/avatar-cache.ts,
 // shared with pipeline/warm-avatars.ts: the warmer caches these same objects
 // nightly while the signed URLs are still fresh, which is the only moment the
 // fetch can succeed. If the two derived different paths, warming would cache
@@ -29,7 +29,7 @@ import {
   avatarPublicUrl,
   avatarStorageName,
   cacheAvatar,
-} from '../shared/avatar-cache';
+} from './_lib/avatar-cache.js';
 
 function admin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;

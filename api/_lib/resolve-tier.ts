@@ -1,3 +1,17 @@
+// Lives under api/_lib, not shared/, and that is load-bearing.
+//
+// @vercel/node compiles each api/*.ts to api/*.js WITHOUT bundling its local
+// imports, so an import of '../shared/resolve-tier' survived into the deployed
+// function as a bare specifier pointing at a directory Vercel never shipped.
+// Every endpoint that imported it died on cold start, in production, for days:
+//
+//   Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/shared/resolve-tier'
+//     imported from /var/task/api/brand-profile.js
+//
+// Files under api/ are compiled and shipped; a leading underscore keeps this
+// directory from being routed as functions. Imports of it carry an explicit
+// .js extension because the deployed importer is ESM and Node will not guess.
+
 /**
  * resolve-tier.ts — server-side entitlement gate.
  *

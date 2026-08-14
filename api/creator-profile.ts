@@ -15,7 +15,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { resolveTier } from '../shared/resolve-tier';
+import { resolveTier } from './_lib/resolve-tier.js';
 
 // Free tier sees the first few products, then the upsell. Enforced HERE, not in
 // the UI, so ?limit= and ?page= cannot widen the response.

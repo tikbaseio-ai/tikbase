@@ -13,7 +13,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { resolveTier } from '../shared/resolve-tier';
+import { resolveTier } from './_lib/resolve-tier.js';
 
 // Free tier sees enough videos to understand the format, then the upsell.
 // Enforced HERE so ?limit= cannot widen it.

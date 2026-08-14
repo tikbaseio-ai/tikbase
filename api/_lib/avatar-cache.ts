@@ -1,3 +1,17 @@
+// Lives under api/_lib, not shared/, and that is load-bearing.
+//
+// @vercel/node compiles each api/*.ts to api/*.js WITHOUT bundling its local
+// imports, so an import of '../shared/avatar-cache' survived into the deployed
+// function as a bare specifier pointing at a directory Vercel never shipped.
+// Every endpoint that imported it died on cold start, in production, for days:
+//
+//   Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/shared/avatar-cache'
+//     imported from /var/task/api/avatar.js
+//
+// Files under api/ are compiled and shipped; a leading underscore keeps this
+// directory from being routed as functions. Imports of it carry an explicit
+// .js extension because the deployed importer is ESM and Node will not guess.
+
 /**
  * avatar-cache.ts — the one storage-write path for creator avatars.
  *

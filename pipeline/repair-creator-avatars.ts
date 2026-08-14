@@ -12,7 +12,7 @@
  *
  * This is the only path that repairs those: ask ScrapeCreators for the creator's
  * current profile, which returns a freshly-signed avatar URL, then cache the
- * bytes through the same shared/avatar-cache path everything else uses and write
+ * bytes through the same api/_lib/avatar-cache path everything else uses and write
  * the fresh URL back to `creators`.
  *
  * UNLIKE every other creator script, THIS ONE SPENDS CREDITS — one per creator
@@ -25,7 +25,7 @@
  *   tsx --env-file=.env pipeline/repair-creator-avatars.ts --dry-run     # no calls, no credits
  */
 import { createClient } from '@supabase/supabase-js';
-import { avatarStorageName, cacheAvatar, listCachedAvatars } from '../shared/avatar-cache';
+import { avatarStorageName, cacheAvatar, listCachedAvatars } from '../api/_lib/avatar-cache.js';
 
 const API_BASE = 'https://api.scrapecreators.com';
 const RATE_LIMIT_MS = 250;

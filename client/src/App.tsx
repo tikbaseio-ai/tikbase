@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import { Switch, Route, Router, Redirect, Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
@@ -28,6 +28,8 @@ import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import SubscriptionSuccessPage from "@/pages/subscription-success";
 import NotFound from "@/pages/not-found";
+import { MaintenanceScreen } from "@/components/MaintenanceScreen";
+import { getServiceState, subscribeServiceState, startServiceWatch } from "@/lib/service-health";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, loading } = useAuth();
@@ -145,6 +147,15 @@ function AppRouter() {
 }
 
 function App() {
+  // Outside every provider on purpose. AuthProvider, SubscriptionProvider and
+  // BookmarkProvider all reach for the network as they mount, and while the
+  // project is restricted those calls either fail or — worse — succeed with an
+  // empty body that reads as real data. Nothing below this line mounts until
+  // the backend is known to be there.
+  const service = useSyncExternalStore(subscribeServiceState, getServiceState, getServiceState);
+  useEffect(() => { startServiceWatch(); }, []);
+  if (service === 'restricted') return <MaintenanceScreen />;
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>

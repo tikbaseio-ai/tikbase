@@ -43,7 +43,7 @@ export function LoadingBar({ loading }: { loading: boolean }) {
             <circle cx="28" cy="28" r="24" fill="none" stroke="#27272a" strokeWidth="3" />
             <circle
               cx="28" cy="28" r="24" fill="none"
-              stroke="#a3ff00"
+              stroke="hsl(var(--primary))"
               strokeWidth="3"
               strokeLinecap="round"
               strokeDasharray={2 * Math.PI * 24}

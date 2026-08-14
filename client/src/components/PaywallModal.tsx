@@ -59,7 +59,7 @@ export function PaywallModal() {
       onClick={closePaywall}
     >
       <div
-        className="relative bg-[#0a0a0c] border border-zinc-800 rounded-xl max-w-md w-full mx-4 p-8"
+        className="relative bg-background border border-border rounded-xl max-w-md w-full mx-4 p-8"
         onClick={e => e.stopPropagation()}
       >
         <button
@@ -70,8 +70,8 @@ export function PaywallModal() {
         </button>
 
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-full bg-[#a3ff00]/10 flex items-center justify-center mx-auto mb-4">
-            <Lock size={24} className="text-[#a3ff00]" />
+          <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} className="text-primary" />
           </div>
           <h2 className="text-xl font-bold text-foreground mb-2">Upgrade to TikBase Pro</h2>
           <p className="text-sm text-zinc-400">{message}</p>
@@ -79,15 +79,15 @@ export function PaywallModal() {
 
         <div className="space-y-3 mb-6">
           <div className="flex items-center gap-3 text-sm text-foreground">
-            <TrendingUp size={16} className="text-[#a3ff00] flex-shrink-0" />
+            <TrendingUp size={16} className="text-primary flex-shrink-0" />
             <span>Unlimited trending videos &amp; products</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-foreground">
-            <BarChart3 size={16} className="text-[#a3ff00] flex-shrink-0" />
+            <BarChart3 size={16} className="text-primary flex-shrink-0" />
             <span>All timeframes — 1 Week to 1 Year</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-foreground">
-            <Zap size={16} className="text-[#a3ff00] flex-shrink-0" />
+            <Zap size={16} className="text-primary flex-shrink-0" />
             <span>Full product &amp; video analytics</span>
           </div>
         </div>
@@ -101,7 +101,7 @@ export function PaywallModal() {
               value={promoCode}
               onChange={e => setPromoCode(e.target.value)}
               placeholder="Discount code"
-              className="w-full h-10 pl-9 pr-3 rounded-lg text-sm border border-zinc-800 bg-zinc-900/50 text-foreground placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-[#a3ff00]/50 focus:border-[#a3ff00]/50"
+              className="w-full h-10 pl-9 pr-3 rounded-lg text-sm border border-zinc-800 bg-zinc-900/50 text-foreground placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50"
             />
           </div>
         </div>
@@ -110,8 +110,7 @@ export function PaywallModal() {
           <button
             onClick={() => handleCheckout('monthly')}
             disabled={loadingPlan !== null}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors disabled:opacity-60"
-            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors disabled:opacity-60 bg-primary text-primary-foreground"
           >
             {loadingPlan === 'monthly' && <Loader2 size={14} className="animate-spin" />}
             $44.99/month
@@ -119,7 +118,7 @@ export function PaywallModal() {
           <button
             onClick={() => handleCheckout('annual')}
             disabled={loadingPlan !== null}
-            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border border-[#a3ff00] text-[#a3ff00] text-center font-semibold text-sm hover:bg-[#a3ff00]/10 transition-colors disabled:opacity-60"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border border-primary text-primary text-center font-semibold text-sm hover:bg-primary/10 transition-colors disabled:opacity-60"
           >
             {loadingPlan === 'annual' && <Loader2 size={14} className="animate-spin" />}
             $31.49/month (billed yearly) — Save 30%

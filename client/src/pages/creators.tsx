@@ -103,8 +103,13 @@ const CONFIDENCE_TITLE =
 function ConfidenceDot({ value, hasGmv }: { value: number; hasGmv: boolean }) {
   if (!hasGmv) return <span className="text-muted-foreground">—</span>;
   const pct = Math.round(value * 100);
+  // Same vocabulary as the products table's dot, which was not true before:
+  // there, accent = measured and amber = modelled, while this ramp was amber
+  // at every level — so a 100%-measured creator and a 0% one differed only in
+  // shade, and a fully measured creator looked modelled next to a product that
+  // did not. Above two thirds measured now reads as the accent.
   const tone =
-    value >= 0.66 ? 'bg-amber-400' : value >= 0.33 ? 'bg-amber-500/70' : 'bg-amber-600/30';
+    value >= 0.66 ? 'bg-primary' : value >= 0.33 ? 'bg-warning/70' : 'bg-warning/30';
   return (
     <span
       className="inline-flex items-center gap-1.5 cursor-help"
@@ -112,7 +117,7 @@ function ConfidenceDot({ value, hasGmv }: { value: number; hasGmv: boolean }) {
     >
       <span
         className={`inline-block h-2 w-2 rounded-full ${tone} ${
-          value === 0 ? 'ring-1 ring-inset ring-amber-600/50' : ''
+          value === 0 ? 'ring-1 ring-inset ring-warning/50' : ''
         }`}
       />
       <span className="font-mono text-xs text-muted-foreground">{pct}%</span>
@@ -132,7 +137,7 @@ function CreatorIdentity({ c }: { c: Creator }) {
         src={`/api/avatar?key=${encodeURIComponent(c.creator_key)}`}
         alt=""
         loading="lazy"
-        className="h-8 w-8 rounded-full object-cover bg-secondary flex-shrink-0"
+        className="h-11 w-11 rounded-full object-cover bg-secondary flex-shrink-0"
       />
       <div className="min-w-0">
         {/* stopPropagation: the row's own click toggles the inline product
@@ -141,7 +146,7 @@ function CreatorIdentity({ c }: { c: Creator }) {
         <Link
           href={creatorProfilePath(c.creator_key)}
           onClick={e => e.stopPropagation()}
-          className="text-sm font-medium text-foreground truncate hover:text-[#a3ff00] transition-colors block"
+          className="text-sm font-medium text-foreground truncate hover:text-primary transition-colors block"
           data-testid={`creator-link-${c.creator_key}`}
         >
           {name}
@@ -204,7 +209,7 @@ export default function CreatorsPage() {
   const lockedNiche = (slug: string) => !isPaid && slug !== 'all';
 
   return (
-    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+    <div className="p-5 md:p-8 max-w-[1400px] mx-auto">
       <div className="mb-1 flex items-center gap-2">
         <h1 className="text-xl font-semibold text-foreground">Top Affiliates</h1>
         <InfoTip size={12}>
@@ -255,12 +260,11 @@ export default function CreatorsPage() {
                 }}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                   window.label === w.label
-                    ? 'text-[#0a0a0c]'
+                    ? 'bg-primary text-primary-foreground'
                     : isLocked
                       ? 'text-zinc-600'
                       : 'text-muted-foreground hover:text-foreground'
                 }`}
-                style={window.label === w.label ? { backgroundColor: '#a3ff00' } : undefined}
                 data-testid={`creators-window-${w.days}`}
               >
                 {w.label}
@@ -340,20 +344,77 @@ export default function CreatorsPage() {
 
       {!loading && !error && !notComputed && creators.length > 0 && (
         <>
-          <div className="rounded-lg border border-border overflow-x-auto">
+          {/* MOBILE — same reflow as the products table, same reason: nine
+              numeric columns cannot survive 390px. Headline is the modelled
+              GMV with its confidence dot; the rest sits underneath. Tapping
+              opens the creator's profile rather than the inline panel, which
+              needs a table row to expand into. */}
+          <div className="md:hidden space-y-3">
+            {creators.map((c, i) => {
+              const rank = (page - 1) * limit + i + 1;
+              const hasGmv = c.metrics.attributedGmv > 0;
+              const name = c.display_name || c.handle || c.creator_key;
+              return (
+                <Link
+                  key={c.creator_key}
+                  href={creatorProfilePath(c.creator_key)}
+                  className="block rounded-lg border border-border bg-card p-4 no-underline active:bg-secondary/30 transition-colors"
+                  data-testid={`creator-card-${rank}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-[11px] text-muted-foreground w-5 flex-shrink-0">{rank}</span>
+                    <img
+                      src={`/api/avatar?key=${encodeURIComponent(c.creator_key)}`}
+                      alt=""
+                      loading="lazy"
+                      className="h-12 w-12 rounded-full object-cover bg-secondary flex-shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{name}</p>
+                      {c.handle && (
+                        <p className="text-[11px] text-muted-foreground font-mono truncate">@{c.handle}</p>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <ConfidenceDot value={c.metrics.gmvConfidence} hasGmv={hasGmv} />
+                        <span className="font-mono text-base font-semibold text-foreground">
+                          {formatGmv(c.metrics.attributedGmv)}
+                        </span>
+                      </div>
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground mt-0.5">Est. GMV</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 mt-3.5 pt-3 border-t border-border/60 text-[11px]">
+                    <span className="text-muted-foreground">
+                      Videos <span className="font-mono text-foreground ml-0.5">{c.metrics.videosPosted.toLocaleString()}</span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Products <span className="font-mono text-foreground ml-0.5">{c.metrics.distinctProducts.toLocaleString()}</span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Views <span className="font-mono text-foreground ml-0.5">{formatViews(c.metrics.viewsOnWindowVideos)}</span>
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block rounded-lg border border-border overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-card/50 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  <th className="text-left font-medium py-2.5 pl-4 pr-2 w-12">#</th>
-                  <th className="text-left font-medium py-2.5 px-2 min-w-[200px]">Creator</th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Videos</th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Products</th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Views</th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Affiliate&nbsp;%</th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">
+                  <th className="text-left font-medium py-3 pl-5 pr-3 w-12">#</th>
+                  <th className="text-left font-medium py-3 px-3 min-w-[200px]">Creator</th>
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Videos</th>
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Products</th>
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Views</th>
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Affiliate&nbsp;%</th>
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">
                     Est. GMV (modeled)
                   </th>
-                  <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">
+                  <th className="text-right font-medium py-3 px-3 whitespace-nowrap">
                     <span title={CONFIDENCE_TITLE} className="cursor-help">Confidence</span>
                   </th>
                   <th className="w-8" />
@@ -371,29 +432,29 @@ export default function CreatorsPage() {
                       onClick={() => setExpanded(isOpen ? null : c.creator_key)}
                       data-testid={`creator-row-${rank}`}
                     >
-                      <td className="py-2.5 pl-4 pr-2 font-mono text-xs text-muted-foreground">
+                      <td className="py-3.5 pl-5 pr-3 font-mono text-xs text-muted-foreground">
                         {rank}
                       </td>
-                      <td className="py-2.5 px-2"><CreatorIdentity c={c} /></td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground">
+                      <td className="py-3.5 px-3"><CreatorIdentity c={c} /></td>
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground">
                         {c.metrics.videosPosted.toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground">
                         {c.metrics.distinctProducts.toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground">
                         {formatViews(c.metrics.viewsOnWindowVideos)}
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-muted-foreground">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-muted-foreground">
                         {Math.round(c.metrics.affiliateIntensity * 100)}%
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs font-semibold text-foreground">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs font-semibold text-foreground">
                         {formatGmv(c.metrics.attributedGmv)}
                       </td>
-                      <td className="py-2.5 px-2 text-right">
+                      <td className="py-3.5 px-3 text-right">
                         <ConfidenceDot value={c.metrics.gmvConfidence} hasGmv={hasGmv} />
                       </td>
-                      <td className="py-2.5 pr-3 text-muted-foreground">
+                      <td className="py-3.5 pr-4 text-muted-foreground">
                         {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </td>
                     </tr>
@@ -446,10 +507,10 @@ export default function CreatorsPage() {
           {!isPaid ? (
             <button
               onClick={() => showPaywall('top_creators')}
-              className="w-full mt-4 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mt-4 mb-4 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-creators"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 Unlock {Math.max(0, total - creators.length).toLocaleString()} more ranked affiliates —
                 see who's really driving sales

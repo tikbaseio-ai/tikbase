@@ -229,7 +229,7 @@ export default function GlobalSearch() {
                       </div>
                       {r.has_ranking_data && (
                         <span
-                          className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-[#a3ff00]/40 text-[#a3ff00] bg-[#a3ff00]/10 flex-shrink-0"
+                          className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-primary/40 text-primary-bright bg-primary/10 flex-shrink-0"
                           title="Ranked in the last 30 days — this product has revenue data."
                         >
                           Ranked

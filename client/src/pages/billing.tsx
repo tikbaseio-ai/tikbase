@@ -39,7 +39,7 @@ export default function BillingPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl" data-testid="billing-page">
+    <div className="p-5 md:p-8 max-w-3xl" data-testid="billing-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Billing</h1>
         <p className="text-sm text-muted-foreground">
@@ -66,8 +66,7 @@ export default function BillingPage() {
         {!isPaid && (
           <a
             href="#/dashboard/plans"
-            className="inline-flex items-center h-8 px-4 rounded-md text-xs font-bold transition-colors no-underline"
-            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            className="inline-flex items-center h-8 px-4 rounded-md text-xs font-bold transition-colors no-underline bg-primary text-primary-foreground"
             data-testid="btn-view-plans"
             onClick={(e) => {
               e.preventDefault();
@@ -92,8 +91,7 @@ export default function BillingPage() {
           <button
             onClick={handleManageSubscription}
             disabled={loading}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-md text-xs font-bold transition-colors disabled:opacity-50"
-            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-md text-xs font-bold transition-colors disabled:opacity-50 bg-primary text-primary-foreground"
             data-testid="btn-manage-subscription"
           >
             {loading && <Loader2 size={14} className="animate-spin" />}

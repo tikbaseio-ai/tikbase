@@ -20,14 +20,27 @@ the named-param form matches a single trailing segment.
 
 ## Design system
 
-- **Accent: violet `#a855f7`.** That is the target. The app is currently lime
-  `#a3ff00` in ~130 places; BB3 repaints it. Until then, new work uses the lime
-  token so the repaint is one mechanical pass, not a hunt.
+- **Accent: violet `#a855f7`, and it lives in exactly one place** —
+  `--primary` in `client/src/index.css`. Never write a colour literal in a
+  component; there is no `text-[#...]` anywhere and the next rebrand should
+  stay a three-line change. Use `text-primary` / `bg-primary/10` /
+  `border-primary/30`, and `text-primary-bright` for small text sitting on a
+  primary tint (the accent at 65% lightness is 4.42:1 on its own 10% tint,
+  under the 4.5:1 floor; `--primary-bright` is the same hue at 72%).
+- `--primary-foreground` is near-black, measured: on the violet fill it reads
+  5.00:1 against white's 3.96:1.
 - **Type: IBM Plex Sans**, `IBM Plex Mono` for anything numeric. Every metric,
   id, price, date and count is monospaced — columns of numbers must line up.
 - **No emojis.** Not in the UI, not in copy, not in commit messages.
 - Dark surface, `border-border` hairlines, `rounded-lg` cards, tabular density.
   Match the page you are editing rather than introducing a new spacing scale.
+- The scale, after BB3: page shell `p-5 md:p-8`, table cells `py-3.5 px-4`
+  (headers `py-3`), cards `px-5 py-4`, section gap `mb-8`, grid gap `gap-4`.
+  Product thumbs are 56px in tables, avatars 44px in the leaderboard and 80-96px
+  on a profile.
+- Below `md`, the products and creators tables render as cards instead — a
+  twelve-column metrics table cannot be shrunk into 390px. The desktop tables
+  are `hidden md:block`; the card lists are `md:hidden`.
 
 ## Numbers must not lie
 

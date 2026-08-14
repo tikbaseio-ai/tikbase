@@ -69,7 +69,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-[#ddffaf]/40 transition-colors"
+                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-primary/40 transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -80,7 +80,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-[#ddffaf]/40 transition-colors"
+                className="w-full px-4 py-3 rounded-lg bg-[#262528] border border-[#48474a]/15 text-white text-sm focus:outline-none focus:border-primary/40 transition-colors"
                 placeholder="Your password"
               />
             </div>
@@ -92,7 +92,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-full bg-[#ddffaf] text-[#3f6600] font-['Space_Grotesk'] font-bold text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-none"
+              className="w-full py-3 rounded-full bg-primary text-primary-foreground font-['Space_Grotesk'] font-bold text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 cursor-pointer border-none"
             >
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
@@ -101,7 +101,7 @@ export default function LoginPage() {
 
         <p className="text-center mt-6 text-[#adaaad] text-sm">
           Don't have an account?{' '}
-          <Link href="/signup" className="text-[#ddffaf] font-medium no-underline hover:underline">Sign up</Link>
+          <Link href="/signup" className="text-primary font-medium no-underline hover:underline">Sign up</Link>
         </p>
       </div>
     </div>

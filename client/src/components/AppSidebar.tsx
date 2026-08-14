@@ -62,8 +62,7 @@ export default function AppSidebar({
       <div className="h-14 flex items-center px-5 border-b border-border">
         <Link href="/dashboard" onClick={dismiss} className="flex items-center gap-2.5 no-underline">
           <div
-            className="w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm"
-            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            className="w-8 h-8 rounded-md flex items-center justify-center font-mono font-bold text-sm bg-primary text-primary-foreground"
           >
             TB
           </div>
@@ -84,10 +83,9 @@ export default function AppSidebar({
                 href={item.path}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors no-underline ${
                   active
-                    ? 'text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
-                style={active ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : undefined}
                 onClick={dismiss}
                 data-testid={`nav-${item.label.toLowerCase()}`}
               >
@@ -108,10 +106,9 @@ export default function AppSidebar({
                 href={item.path}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors no-underline ${
                   active
-                    ? 'text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
-                style={active ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : undefined}
                 onClick={dismiss}
                 data-testid={`nav-${item.label.toLowerCase()}`}
               >

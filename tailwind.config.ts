@@ -30,7 +30,11 @@ export default {
           DEFAULT: "hsl(var(--primary) / <alpha-value>)",
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
           border: "var(--primary-border)",
+          // The accent lifted for small text on a primary tint — see the
+          // contrast note in index.css. Not a second brand colour.
+          bright: "hsl(var(--primary-bright) / <alpha-value>)",
         },
+        warning: "hsl(var(--warning) / <alpha-value>)",
         secondary: {
           DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
           foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",

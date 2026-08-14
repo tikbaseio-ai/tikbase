@@ -90,7 +90,7 @@ function StatCard({
   muted?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
+    <div className="rounded-lg border border-border bg-card px-5 py-4">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
         {icon}
         <span>{label}</span>
@@ -155,7 +155,7 @@ export default function CreatorProfilePage() {
     : 1;
 
   return (
-    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+    <div className="p-5 md:p-8 max-w-[1400px] mx-auto">
       <Link
         href="/dashboard/creators"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
@@ -192,15 +192,15 @@ export default function CreatorProfilePage() {
       {!loading && !error && !notFound && data && (
         <>
           {/* Identity */}
-          <div className="flex items-start gap-4 mb-6">
+          <div className="flex items-start gap-5 mb-8">
             <img
               src={data.creator.avatar_url}
               alt=""
-              className="h-16 w-16 rounded-full object-cover bg-secondary flex-shrink-0"
+              className="h-20 w-20 md:h-24 md:w-24 rounded-full object-cover bg-secondary flex-shrink-0"
               data-testid="creator-profile-avatar"
             />
             <div className="min-w-0 flex-1">
-              <h1 className="text-xl font-semibold text-foreground truncate">{name}</h1>
+              <h1 className="text-2xl font-semibold text-foreground truncate tracking-tight">{name}</h1>
               {/* Numeric-key creators have no handle and therefore no profile to
                   link to — show the key rather than inventing an @id: URL. */}
               {data.creator.tiktok_url ? (
@@ -208,7 +208,7 @@ export default function CreatorProfilePage() {
                   href={data.creator.tiktok_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-[#a3ff00] transition-colors"
+                  className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-primary transition-colors"
                   data-testid="creator-profile-tiktok"
                 >
                   @{data.creator.handle}
@@ -244,7 +244,7 @@ export default function CreatorProfilePage() {
               its post date; views are lifetime counts on videos posted in that window.
             </InfoTip>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
             <StatCard
               label="Videos" icon={<Video size={11} />}
               value={(w30?.videos ?? 0).toLocaleString()}
@@ -301,21 +301,21 @@ export default function CreatorProfilePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-card/50 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="text-left font-medium py-2.5 pl-4 pr-2">Product</th>
-                    <th className="text-right font-medium py-2.5 px-2 whitespace-nowrap">Videos</th>
-                    <th className="text-right font-medium py-2.5 px-4 whitespace-nowrap">Views</th>
+                    <th className="text-left font-medium py-3 pl-5 pr-3">Product</th>
+                    <th className="text-right font-medium py-3 px-3 whitespace-nowrap">Videos</th>
+                    <th className="text-right font-medium py-3 px-5 whitespace-nowrap">Views</th>
                   </tr>
                 </thead>
                 <tbody data-testid="creator-profile-products">
                   {data.products.map(p => (
                     <tr key={p.product_id} className="border-b border-border/60 last:border-0">
-                      <td className="py-2.5 pl-4 pr-2">
+                      <td className="py-3.5 pl-5 pr-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <img
                             src={`/api/thumb?product_id=${encodeURIComponent(p.product_id)}`}
                             alt=""
                             loading="lazy"
-                            className="h-9 w-9 rounded object-cover bg-secondary flex-shrink-0"
+                            className="h-12 w-12 rounded-md object-cover bg-secondary flex-shrink-0"
                             onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
                           />
                           {/* Bounded so a 200-character product title cannot
@@ -330,10 +330,10 @@ export default function CreatorProfilePage() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-2.5 px-2 text-right font-mono text-xs text-foreground">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs text-foreground">
                         {p.videos.toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-4 text-right font-mono text-xs text-foreground">
+                      <td className="py-3.5 px-5 text-right font-mono text-xs text-foreground">
                         {formatViews(p.views)}
                       </td>
                     </tr>
@@ -348,10 +348,10 @@ export default function CreatorProfilePage() {
           {!isPaid && data.productsTotal > data.products.length ? (
             <button
               onClick={() => showPaywall('creator_profile_products')}
-              className="w-full mb-6 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mb-6 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-creator-products"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 Unlock all {data.productsTotal.toLocaleString()} products and this creator's
                 modeled GMV
@@ -383,7 +383,7 @@ export default function CreatorProfilePage() {
           {data.topVideos.length > 0 && (
             <>
               <h2 className="text-sm font-semibold text-foreground mb-2">Top videos</h2>
-              <div className="flex gap-3 overflow-x-auto pb-2" data-testid="creator-profile-videos">
+              <div className="flex gap-4 overflow-x-auto pb-2" data-testid="creator-profile-videos">
                 {data.topVideos.map((v, i) => {
                   const vid = videoIdOf(v);
                   return (
@@ -392,7 +392,7 @@ export default function CreatorProfilePage() {
                       href={v.video_url || '#'}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group flex-shrink-0 w-[120px]"
+                      className="group flex-shrink-0 w-[140px]"
                     >
                       <div className="relative rounded-md overflow-hidden bg-secondary aspect-[9/16]">
                         {vid && (

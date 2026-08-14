@@ -96,7 +96,7 @@ function StatCard({ label, value, icon, muted, hint }: {
   label: string; value: string; icon: React.ReactNode; muted?: boolean; hint?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
+    <div className="rounded-lg border border-border bg-card px-5 py-4">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
         {icon}<span>{label}</span>{hint}
       </div>
@@ -144,7 +144,7 @@ export default function ProductDetailPage() {
   const p = data?.product;
 
   return (
-    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+    <div className="p-5 md:p-8 max-w-[1400px] mx-auto">
       <Link
         href="/dashboard/products"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
@@ -178,21 +178,21 @@ export default function ProductDetailPage() {
       {!loading && !error && !notFound && data && p && (
         <>
           {/* Identity */}
-          <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row items-start gap-5 mb-8">
             <img
               src={p.image_url}
               alt=""
-              className="h-28 w-28 rounded-lg object-cover bg-secondary flex-shrink-0 border border-border"
+              className="h-32 w-32 md:h-44 md:w-44 rounded-xl object-cover bg-secondary flex-shrink-0 border border-border"
               data-testid="product-detail-image"
             />
             <div className="min-w-0 flex-1">
-              <h1 className="text-lg md:text-xl font-semibold text-foreground leading-snug">{p.title}</h1>
+              <h1 className="text-xl md:text-2xl font-semibold text-foreground leading-snug tracking-tight">{p.title}</h1>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-muted-foreground">
                 {p.seller_name && (
                   p.seller_id ? (
                     <Link
                       href={brandProfilePath(p.seller_id)}
-                      className="text-foreground hover:text-[#a3ff00] transition-colors"
+                      className="text-foreground hover:text-primary transition-colors"
                       data-testid="product-detail-brand-link"
                     >
                       {p.seller_name}
@@ -211,7 +211,7 @@ export default function ProductDetailPage() {
                     href={isPaid ? p.product_url : undefined}
                     onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('product_detail'); } }}
                     target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[#a3ff00] hover:underline cursor-pointer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline cursor-pointer"
                   >
                     <ExternalLink size={10} /> View on TikTok Shop
                   </a>
@@ -247,7 +247,7 @@ export default function ProductDetailPage() {
               post date; views are lifetime counts on videos posted in that window.
             </InfoTip>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
             <StatCard label="Videos" icon={<Video size={11} />} value={(w30?.videos ?? 0).toLocaleString()} />
             <StatCard label="Creators" icon={<Users size={11} />} value={(w30?.creators ?? 0).toLocaleString()} />
             <StatCard label="Views" icon={<Eye size={11} />} value={formatViews(w30?.views ?? 0)} />
@@ -311,7 +311,7 @@ export default function ProductDetailPage() {
                   // out to TikTok; the profile link sits beside it.
                   <div
                     key={v.video_id || v.video_url || i}
-                    className="group relative rounded-lg border border-border bg-card hover:border-[#a3ff00]/40 transition-colors"
+                    className="group relative rounded-lg border border-border bg-card hover:border-primary/40 transition-colors"
                   >
                     <a
                       href={v.video_url || '#'}
@@ -332,7 +332,7 @@ export default function ProductDetailPage() {
                       </div>
                       {v.commissioned && (
                         <div
-                          className="absolute top-1 right-1 px-1 py-0.5 rounded bg-[#a3ff00] text-[9px] font-bold text-[#0a0a0c]"
+                          className="absolute top-1 right-1 px-1 py-0.5 rounded bg-primary text-[9px] font-bold text-primary-foreground"
                           title="This video carries TikTok's “Creator earns commission” label."
                         >
                           $
@@ -358,7 +358,7 @@ export default function ProductDetailPage() {
                         {v.creator_key && (
                           <Link
                             href={creatorProfilePath(v.creator_key)}
-                            className="text-[10px] text-muted-foreground hover:text-[#a3ff00] transition-colors"
+                            className="text-[10px] text-muted-foreground hover:text-primary transition-colors"
                           >
                             profile
                           </Link>
@@ -379,10 +379,10 @@ export default function ProductDetailPage() {
           {!isPaid && data.videosTotal > data.videosShown && (
             <button
               onClick={() => showPaywall('product_videos')}
-              className="w-full mt-4 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mt-4 mb-4 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-product-videos"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 Unlock all {data.videosTotal.toLocaleString()} videos for this product — and its modeled GMV
               </span>

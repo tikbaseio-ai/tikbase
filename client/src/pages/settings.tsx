@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const [notifyWeekly, setNotifyWeekly] = useState(true);
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl" data-testid="settings-page">
+    <div className="p-5 md:p-8 max-w-3xl" data-testid="settings-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Settings</h1>
         <p className="text-sm text-muted-foreground">
@@ -54,8 +54,7 @@ export default function SettingsPage() {
             />
           </div>
           <button
-            className="h-8 px-4 rounded-md text-xs font-bold transition-colors"
-            style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+            className="h-8 px-4 rounded-md text-xs font-bold transition-colors bg-primary text-primary-foreground"
             data-testid="btn-save-profile"
           >
             Save Changes
@@ -121,14 +120,14 @@ export default function SettingsPage() {
               <button
                 onClick={() => item.setter(!item.state)}
                 className={`relative w-9 h-5 rounded-full transition-colors ${
-                  item.state ? 'bg-[#a3ff00]' : 'bg-muted'
+                  item.state ? 'bg-primary' : 'bg-muted'
                 }`}
                 data-testid={`toggle-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
               >
                 <div
                   className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${
                     item.state
-                      ? 'translate-x-[18px] bg-[#0a0a0c]'
+                      ? 'translate-x-[18px] bg-primary-foreground'
                       : 'translate-x-0.5 bg-foreground'
                   }`}
                 />

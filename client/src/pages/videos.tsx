@@ -79,7 +79,7 @@ export default function VideosPage() {
   const nicheLabel = NICHES.find(n => n.slug === niche)?.label || niche;
 
   return (
-    <div className="p-4 md:p-6" data-testid="videos-page">
+    <div className="p-5 md:p-8" data-testid="videos-page">
       {/* First-run "how it works" strip (dismissible) */}
       <OnboardingBanner />
 
@@ -97,7 +97,7 @@ export default function VideosPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-4 mb-8">
         {/* Niche dropdown */}
         <select
           value={niche}
@@ -132,16 +132,11 @@ export default function VideosPage() {
                 }}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                   timeframe.label === tf.label
-                    ? 'text-[#0a0a0c]'
+                    ? 'bg-primary text-primary-foreground'
                     : isLocked
                       ? 'text-zinc-600'
                       : 'text-muted-foreground hover:text-foreground'
                 }`}
-                style={
-                  timeframe.label === tf.label
-                    ? { backgroundColor: '#a3ff00' }
-                    : undefined
-                }
                 data-testid={`timeframe-${tf.days}`}
               >
                 {tf.label}
@@ -224,8 +219,8 @@ export default function VideosPage() {
                       style={{ display: video.cover_image_url ? 'none' : 'flex' }}
                     >
                       <div className="text-center">
-                        <div className="w-12 h-12 rounded-full bg-[#a3ff00]/20 flex items-center justify-center mx-auto mb-2">
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a3ff00" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-2">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--primary))" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         </div>
                         <span className="text-[10px] font-mono text-zinc-500">{formatViews(video.view_count || 0)} views</span>
                       </div>
@@ -233,8 +228,7 @@ export default function VideosPage() {
 
                     {/* Rank badge */}
                     <div
-                      className="absolute top-2 left-2 px-2 py-0.5 rounded font-mono text-xs font-bold"
-                      style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+                      className="absolute top-2 left-2 px-2 py-0.5 rounded font-mono text-xs font-bold bg-primary text-primary-foreground"
                     >
                       #{rank}
                     </div>
@@ -258,7 +252,7 @@ export default function VideosPage() {
                     >
                       <Bookmark
                         size={14}
-                        className={bookmarked ? 'text-[#a3ff00] fill-[#a3ff00]' : 'text-white/70'}
+                        className={bookmarked ? 'text-primary fill-primary' : 'text-white/70'}
                       />
                     </button>
 
@@ -324,7 +318,7 @@ export default function VideosPage() {
                             <p className="text-xs text-foreground font-medium leading-snug line-clamp-2">
                               {video.product.title}
                             </p>
-                            <span className="inline-block mt-1 text-[10px] font-mono font-semibold text-[#a3ff00] bg-[#a3ff00]/10 px-1.5 py-0.5 rounded">
+                            <span className="inline-block mt-1 text-[10px] font-mono font-semibold text-primary-bright bg-primary/10 px-1.5 py-0.5 rounded">
                               {(video.product.sold_count || 0).toLocaleString()} sold
                             </span>
                           </div>
@@ -335,7 +329,7 @@ export default function VideosPage() {
                             onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('product_detail'); } }}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-1.5 py-2 border-t border-border text-[11px] font-medium text-[#a3ff00] hover:bg-[#a3ff00]/5 transition-colors cursor-pointer"
+                            className="flex items-center justify-center gap-1.5 py-2 border-t border-border text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors cursor-pointer"
                           >
                             <ExternalLink size={11} />
                             View Product
@@ -354,10 +348,10 @@ export default function VideosPage() {
           {!isPaid ? (
             <button
               onClick={() => showPaywall('top_videos')}
-              className="w-full mt-8 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mt-8 mb-4 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-videos"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 Unlock {Math.max(0, total - videos.length).toLocaleString()}+ more videos — see everything trending right now
               </span>

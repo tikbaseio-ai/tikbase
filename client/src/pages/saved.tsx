@@ -13,7 +13,7 @@ export default function SavedPage() {
   } = useBookmarks();
 
   return (
-    <div className="p-4 md:p-6" data-testid="saved-page">
+    <div className="p-5 md:p-8" data-testid="saved-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Saved</h1>
         <p className="text-sm text-muted-foreground">
@@ -27,10 +27,9 @@ export default function SavedPage() {
           onClick={() => setTab('videos')}
           className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
             tab === 'videos'
-              ? 'text-[#0a0a0c]'
+              ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
-          style={tab === 'videos' ? { backgroundColor: '#a3ff00' } : undefined}
           data-testid="tab-videos"
         >
           Videos ({savedVideos.length})
@@ -39,10 +38,9 @@ export default function SavedPage() {
           onClick={() => setTab('products')}
           className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
             tab === 'products'
-              ? 'text-[#0a0a0c]'
+              ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
-          style={tab === 'products' ? { backgroundColor: '#a3ff00' } : undefined}
           data-testid="tab-products"
         >
           Products ({savedProducts.length})
@@ -115,8 +113,8 @@ export default function SavedPage() {
                     {video.product && (
                       <div className="pt-2 border-t border-border">
                         <div className="flex items-center gap-1 mb-1">
-                          <ShoppingBag size={10} className="text-[#a3ff00]" />
-                          <span className="text-[10px] font-mono font-semibold tracking-wider text-[#a3ff00] uppercase">
+                          <ShoppingBag size={10} className="text-primary" />
+                          <span className="text-[10px] font-mono font-semibold tracking-wider text-primary uppercase">
                             Product
                           </span>
                         </div>
@@ -152,15 +150,14 @@ export default function SavedPage() {
                   className="flex items-center gap-4 p-3 rounded-lg border border-border bg-card"
                   data-testid={`saved-product-${product.product_id}`}
                 >
-                  {product.image_url ? (
-                    <img
-                      src={product.image_url}
-                      alt=""
-                      className="w-12 h-12 rounded object-cover border border-border"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded bg-muted" />
-                  )}
+                  {/* Proxied: a bookmark can outlive the signed CDN URL that
+                      was captured with it by months. */}
+                  <img
+                    src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`}
+                    alt=""
+                    className="w-12 h-12 rounded object-cover border border-border bg-muted"
+                    onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground line-clamp-1">
                       {product.title}
@@ -169,7 +166,7 @@ export default function SavedPage() {
                       <span className="text-xs font-mono text-muted-foreground">
                         {(product.sold_count || 0).toLocaleString()} sold
                       </span>
-                      <span className="text-xs font-mono text-[#a3ff00]">
+                      <span className="text-xs font-mono text-primary">
                         ${(product.sale_price || 0).toFixed(2)}
                       </span>
                     </div>

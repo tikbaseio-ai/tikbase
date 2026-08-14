@@ -72,7 +72,7 @@ export default function OverviewPage() {
   }, [timeframe.days]);
 
   return (
-    <div className="p-4 md:p-6" data-testid="overview-page">
+    <div className="p-5 md:p-8" data-testid="overview-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Overview</h1>
         <p className="text-sm text-muted-foreground">
@@ -89,9 +89,9 @@ export default function OverviewPage() {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Package size={15} className="text-[#a3ff00]" /> Top 5 Products
+                <Package size={15} className="text-primary" /> Top 5 Products
               </h2>
-              <Link href="/dashboard/products" className="flex items-center gap-1 text-xs text-[#a3ff00] hover:underline no-underline" data-testid="overview-view-all-products">
+              <Link href="/dashboard/products" className="flex items-center gap-1 text-xs text-primary hover:underline no-underline" data-testid="overview-view-all-products">
                 View all <ArrowRight size={12} />
               </Link>
             </div>
@@ -118,8 +118,8 @@ export default function OverviewPage() {
                         <tr key={product.product_id} className="hover:bg-secondary/30 transition-colors" data-testid={`overview-product-${rank}`}>
                           <td className="py-2.5 px-3">
                             <span
-                              className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold"
-                              style={rank <= 3 ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : { backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}
+                              className={`inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold ${
+                                rank <= 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
                             >
                               {rank}
                             </span>
@@ -127,9 +127,8 @@ export default function OverviewPage() {
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
-                                {product.image_url && (
-                                  <img src={product.image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                )}
+                                {/* Proxied, same reason as the products table. */}
+                                <img src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                               </div>
                               <div className="min-w-0">
                                 <p className="text-xs font-medium text-foreground line-clamp-2 leading-snug">{product.title}</p>
@@ -138,7 +137,7 @@ export default function OverviewPage() {
                                     href={isPaid ? product.product_url : undefined}
                                     onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('product_detail'); } }}
                                     target="_blank" rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-[10px] text-[#a3ff00] hover:underline mt-0.5 cursor-pointer"
+                                    className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5 cursor-pointer"
                                   >
                                     <ExternalLink size={9} /> View
                                   </a>
@@ -153,7 +152,7 @@ export default function OverviewPage() {
                               // does there.
                               <span className="inline-flex items-center justify-end gap-1.5">
                                 <ConfidenceDot hasRealDelta={m.hasRealDelta} hasRealPrice={m.hasRealPrice} />
-                                <span className="font-mono text-xs font-semibold text-[#a3ff00]">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue!)}</span>
+                                <span className="font-mono text-xs font-semibold text-primary">{!m.hasRealPrice ? '≈ ' : ''}{formatRevenue(m.estRevenue!)}</span>
                               </span>
                             ) : (
                               <span className="text-zinc-500 text-xs">—</span>
@@ -180,9 +179,9 @@ export default function OverviewPage() {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Play size={15} className="text-[#a3ff00]" /> Top 5 Videos
+                <Play size={15} className="text-primary" /> Top 5 Videos
               </h2>
-              <Link href="/dashboard" className="flex items-center gap-1 text-xs text-[#a3ff00] hover:underline no-underline" data-testid="overview-view-all-videos">
+              <Link href="/dashboard" className="flex items-center gap-1 text-xs text-primary hover:underline no-underline" data-testid="overview-view-all-videos">
                 View all <ArrowRight size={12} />
               </Link>
             </div>
@@ -203,7 +202,7 @@ export default function OverviewPage() {
                         ) : (
                           <div className="w-full h-full bg-gradient-to-b from-zinc-800 to-zinc-900" />
                         )}
-                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded font-mono text-xs font-bold" style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}>#{rank}</div>
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded font-mono text-xs font-bold bg-primary text-primary-foreground" >#{rank}</div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm">
                           <Eye size={12} className="text-white/80" />
                           <span className="text-[11px] font-mono font-medium text-white">{formatViews(video.view_count || 0)}</span>

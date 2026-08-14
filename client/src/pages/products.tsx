@@ -194,20 +194,20 @@ export default function ProductsPage() {
     const active = sortKey === sortKeyVal;
     return (
       <th
-        className={`py-3 px-3 font-medium text-[11px] cursor-pointer select-none hover:text-foreground transition-colors ${active ? 'text-[#a3ff00]' : 'text-muted-foreground'} ${className}`}
+        className={`py-3 px-3 font-medium text-[11px] cursor-pointer select-none hover:text-foreground transition-colors ${active ? 'text-primary' : 'text-muted-foreground'} ${className}`}
         onClick={() => toggleSort(sortKeyVal)}
       >
         <div className={`flex items-center gap-1 ${className.includes('text-left') ? '' : 'justify-end'}`}>
           {label}
           {tip && <InfoTip size={11}>{tip}</InfoTip>}
-          {active && (sortDir === 'desc' ? <ChevronDown size={12} className="text-[#a3ff00]" /> : <ChevronUp size={12} className="text-[#a3ff00]" />)}
+          {active && (sortDir === 'desc' ? <ChevronDown size={12} className="text-primary" /> : <ChevronUp size={12} className="text-primary" />)}
         </div>
       </th>
     );
   }
 
   return (
-    <div className="p-4 md:p-6" data-testid="products-page">
+    <div className="p-5 md:p-8" data-testid="products-page">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">
@@ -226,8 +226,7 @@ export default function ProductsPage() {
             <button
               key={val}
               onClick={() => applyMode(val)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${mode === val ? 'text-[#0a0a0c]' : 'text-muted-foreground hover:text-foreground'}`}
-              style={mode === val ? { backgroundColor: '#a3ff00' } : undefined}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${mode === val ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               data-testid={`mode-${val}`}
             >
               {label}
@@ -266,8 +265,7 @@ export default function ProductsPage() {
                   if (isLocked) { showPaywall('timeframe'); return; }
                   setTimeframe(tf);
                 }}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${timeframe.label === tf.label ? 'text-[#0a0a0c]' : isLocked ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}
-                style={timeframe.label === tf.label ? { backgroundColor: '#a3ff00' } : undefined}>
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${timeframe.label === tf.label ? 'bg-primary text-primary-foreground' : isLocked ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}>
                 {tf.label}
                 {isLocked && <Lock size={8} className="inline ml-1 opacity-50" />}
               </button>
@@ -307,12 +305,89 @@ export default function ProductsPage() {
 
       {!loading && pageProducts.length > 0 && (
         <>
-          <div className="rounded-lg border border-border bg-card overflow-x-auto">
+          {/* MOBILE — the #27 deferral. A 12-column metrics table cannot be made
+              readable at 390px by shrinking it, so below md the same rows
+              render as cards: thumb, name, the 30-day figure with its
+              confidence dot and badge, then price / 7d / creators underneath.
+              The desktop table below is structurally untouched. */}
+          <div className="md:hidden space-y-3">
+            {pageProducts.map((product, idx) => {
+              const rank = (page - 1) * limit + idx + 1;
+              const price = product.sale_price || 0;
+              const w30 = product.windows?.['30'];
+              const w7 = product.windows?.['7'];
+              return (
+                <Link
+                  key={product.product_id}
+                  href={productDetailPath(product.product_id)}
+                  className="block rounded-lg border border-border bg-card p-4 no-underline active:bg-secondary/30 transition-colors"
+                  data-testid={`product-card-${product.product_id}`}
+                >
+                  <div className="flex gap-3.5">
+                    <div className="w-16 h-16 rounded-md border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
+                      <img
+                        src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`}
+                        alt="" loading="lazy" className="w-full h-full object-cover"
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-mono font-bold flex-shrink-0 ${
+                          rank <= 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                          {rank}
+                        </span>
+                        <p className="text-[13px] font-medium text-foreground leading-snug line-clamp-2 min-w-0">
+                          {product.title}
+                        </p>
+                      </div>
+                      {product.seller_name && (
+                        <p className="text-[11px] text-muted-foreground truncate mt-1">{product.seller_name}</p>
+                      )}
+                      <div className="flex items-center gap-2 mt-2">
+                        {/* The headline number, at the size it deserves. */}
+                        {w30 ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <ConfidenceDot hasRealDelta={w30.hasRealDelta} hasRealPrice={w30.hasRealPrice} />
+                            <span className="font-mono text-base font-semibold text-foreground">
+                              {w30.revenue > 0 ? `${w30.hasRealPrice ? '' : '≈'}${formatRevenue(w30.revenue)}` : '—'}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="font-mono text-base text-zinc-600">—</span>
+                        )}
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">30d</span>
+                        {product.opportunity && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border border-primary/40 text-primary-bright bg-primary/10">
+                            <Sparkles size={8} /> Opportunity
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 mt-3.5 pt-3 border-t border-border/60 text-[11px]">
+                    <span className="text-muted-foreground">
+                      Price <span className="font-mono text-foreground ml-0.5">{price > 0 ? `$${price.toFixed(2)}` : '—'}</span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      7d <span className="font-mono text-foreground ml-0.5">{w7 && w7.revenue > 0 ? formatRevenue(w7.revenue) : '—'}</span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Creators <span className="font-mono text-foreground ml-0.5">
+                        {product.distinct_creators == null ? '—' : product.distinct_creators.toLocaleString()}
+                      </span>
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block rounded-lg border border-border bg-card overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground w-12">#</th>
-                  <th className="text-left py-3 px-3 font-medium text-[11px] text-muted-foreground min-w-[260px]">Product</th>
+                  <th className="text-left py-3.5 px-4 font-medium text-[11px] text-muted-foreground w-12">#</th>
+                  <th className="text-left py-3.5 px-4 font-medium text-[11px] text-muted-foreground min-w-[260px]">Product</th>
                   <SortHeader
                     label="Price"
                     sortKeyVal="sale_price"
@@ -322,8 +397,8 @@ export default function ProductsPage() {
                     label="7d GMV"
                     sortKeyVal="revenue7d"
                     tip={<>Revenue from units sold in the last 7 days. The dot is confidence:
-                      <span className="text-[#a3ff00]"> green</span> = measured from a real sales
-                      snapshot, <span className="text-amber-500">amber</span> = modeled from views.
+                      <span className="text-primary-bright">violet</span> = measured from a real
+                      sales snapshot, <span className="text-warning">amber</span> = modeled from views.
                       “—” means the product isn’t ranked in that window, which is not the same as
                       zero sales.</>}
                   />
@@ -361,7 +436,7 @@ export default function ProductsPage() {
                     sortKeyVal="distinct_creators"
                     tip="Distinct creators who posted about this product inside the ranking window — at 30 days this is creators per month. Low creators against proven sales is the opportunity signal."
                   />
-                  <th className="hidden md:table-cell py-3 px-3 font-medium text-[11px] text-muted-foreground">
+                  <th className="hidden md:table-cell py-4 px-4 font-medium text-[11px] text-muted-foreground">
                     <div className="flex items-center gap-1 justify-end">
                       Affiliate&nbsp;%
                       <InfoTip size={11}>
@@ -381,7 +456,7 @@ export default function ProductsPage() {
                     sortKeyVal="periodViews"
                     tip="TikTok views from videos posted within the ranking window. This is what the Trending mode sorts by."
                   />
-                  <th className="py-3 px-3 w-10"></th>
+                  <th className="py-4 px-4 w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -396,23 +471,29 @@ export default function ProductsPage() {
 
                   return (
                     <tr key={product.product_id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="py-3 px-3">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold"
-                          style={rank <= 3 ? { backgroundColor: '#a3ff00', color: '#0a0a0c' } : { backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}>
+                      <td className="py-4 px-4">
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-mono font-bold ${
+                          rank <= 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                           {rank}
                         </span>
                       </td>
 
-                      <td className="py-3 px-3">
+                      <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
-                            {product.image_url && <img src={product.image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+                          <div className="w-14 h-14 rounded-md border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
+                            {/* Through the cache-through proxy, not the payload's
+                                image_url: precomputed payloads carry the raw
+                                signed CDN URL and those 403 once the signature
+                                lapses — measured 8 of 20 dead on this page.
+                                Enlarging the box without this only enlarges the
+                                hole. */}
+                            <img src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-start gap-1.5">
                               <Link
                                 href={productDetailPath(product.product_id)}
-                                className="text-xs font-medium text-foreground line-clamp-2 leading-snug hover:text-[#a3ff00] transition-colors"
+                                className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug hover:text-primary transition-colors"
                                 data-testid={`product-link-${product.product_id}`}
                               >
                                 {product.title}
@@ -421,7 +502,7 @@ export default function ProductsPage() {
                                   of the product, not another metric column. */}
                               {product.opportunity && (
                                 <span
-                                  className="inline-flex items-center gap-0.5 flex-shrink-0 mt-px px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border border-[#a3ff00]/40 text-[#a3ff00] bg-[#a3ff00]/10"
+                                  className="inline-flex items-center gap-0.5 flex-shrink-0 mt-px px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border border-primary/40 text-primary-bright bg-primary/10"
                                   title="Opportunity: measured sales in this window's top revenue quartile, promoted by fewer creators than the median product on this page. Proven demand, little competition."
                                   data-testid="opportunity-badge"
                                 >
@@ -438,7 +519,7 @@ export default function ProductsPage() {
                                     name but not its id. The API resolves it. */}
                                 <Link
                                   href={brandProfilePath(`name:${product.seller_name}`)}
-                                  className="hover:text-[#a3ff00] transition-colors"
+                                  className="hover:text-primary transition-colors"
                                   data-testid="product-row-brand-link"
                                 >
                                   {product.seller_name}
@@ -450,7 +531,7 @@ export default function ProductsPage() {
                                 href={isPaid ? product.product_url : undefined}
                                 onClick={e => { if (!isPaid) { e.preventDefault(); showPaywall('product_detail'); } }}
                                 target="_blank" rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[10px] text-[#a3ff00] hover:underline mt-0.5 cursor-pointer"
+                                className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5 cursor-pointer"
                               >
                                 <ExternalLink size={9} /> View
                               </a>
@@ -460,34 +541,34 @@ export default function ProductsPage() {
                       </td>
 
                       {/* Price */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="py-4 px-4 text-right">
                         <span className="font-mono text-xs font-medium text-foreground">
                           {price > 0 ? `$${price.toFixed(2)}` : '—'}
                         </span>
                       </td>
 
                       {/* 7d / 30d GMV — always both, whatever the ranking window */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="py-4 px-4 text-right">
                         <GmvCell w={product.windows?.['7']} />
                       </td>
-                      <td className="py-3 px-3 text-right">
+                      <td className="py-4 px-4 text-right">
                         <GmvCell w={product.windows?.['30']} />
                       </td>
                       {extraWindow && (
-                        <td className="py-3 px-3 text-right">
+                        <td className="py-4 px-4 text-right">
                           <GmvCell w={product.windows?.[String(extraWindow)]} />
                         </td>
                       )}
 
                       {/* Total sold (lifetime) */}
-                      <td className="py-3 px-3 text-right">
+                      <td className="py-4 px-4 text-right">
                         <span className="font-mono text-xs text-foreground">
                           {product.sold_count > 0 ? formatCompactNumber(product.sold_count) : '—'}
                         </span>
                       </td>
 
                       {/* In stock */}
-                      <td className="hidden md:table-cell py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-4 px-4 text-right">
                         <span className="font-mono text-xs text-foreground">
                           {product.stock_quantity != null && product.stock_quantity > 0
                             ? formatCompactNumber(product.stock_quantity)
@@ -500,7 +581,7 @@ export default function ProductsPage() {
                           product that is measurably selling" is precisely the
                           opportunity signal, and a dash would read as "unknown"
                           and hide it. Only a missing field dashes. */}
-                      <td className="hidden md:table-cell py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-4 px-4 text-right">
                         <span
                           className="font-mono text-xs text-foreground"
                           title={
@@ -517,7 +598,7 @@ export default function ProductsPage() {
 
                       {/* Affiliate intensity — null (no window videos) shows a
                           dash, never 0%, which would claim nobody was paid. */}
-                      <td className="hidden md:table-cell py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-4 px-4 text-right">
                         <span className="font-mono text-xs text-muted-foreground">
                           {product.affiliate_intensity == null
                             ? '—'
@@ -526,7 +607,7 @@ export default function ProductsPage() {
                       </td>
 
                       {/* Views — the Trending ranking signal */}
-                      <td className="hidden md:table-cell py-3 px-3 text-right">
+                      <td className="hidden md:table-cell py-4 px-4 text-right">
                         {/* An em dash covers both "no views" and "we could not
                             read them"; the tooltip is what tells them apart,
                             because a zero and an unknown must not look alike. */}
@@ -541,9 +622,9 @@ export default function ProductsPage() {
                         </div>
                       </td>
 
-                      <td className="py-3 px-3">
+                      <td className="py-4 px-4">
                         <button onClick={() => toggleProductBookmark(product)} className="w-7 h-7 rounded flex items-center justify-center hover:bg-secondary transition-colors">
-                          <Bookmark size={14} className={bookmarked ? 'text-[#a3ff00] fill-[#a3ff00]' : 'text-muted-foreground'} />
+                          <Bookmark size={14} className={bookmarked ? 'text-primary fill-primary' : 'text-muted-foreground'} />
                         </button>
                       </td>
                     </tr>
@@ -558,10 +639,10 @@ export default function ProductsPage() {
           {!isPaid ? (
             <button
               onClick={() => showPaywall('top_products')}
-              className="w-full mt-4 mb-4 rounded-lg border border-[#a3ff00]/30 bg-[#a3ff00]/5 hover:bg-[#a3ff00]/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full mt-4 mb-4 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors px-6 py-5 flex items-center justify-center gap-3 cursor-pointer"
               data-testid="upsell-products"
             >
-              <Lock size={16} className="text-[#a3ff00]" />
+              <Lock size={16} className="text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 Unlock {Math.max(0, total - pageProducts.length).toLocaleString()}+ more products — see everything selling right now
               </span>

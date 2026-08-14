@@ -115,14 +115,13 @@ export default function SubscriptionSuccessPage() {
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center p-6"
-      style={{ backgroundColor: '#0a0a0c' }}
+      className="fixed inset-0 flex items-center justify-center p-6 bg-background"
     >
       <div className="max-w-md w-full text-center">
         {stage === 'verifying' && (
           <>
-            <div className="w-16 h-16 rounded-full bg-[#a3ff00]/10 flex items-center justify-center mx-auto mb-6">
-              <Loader2 size={28} className="text-[#a3ff00] animate-spin" />
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+              <Loader2 size={28} className="text-primary animate-spin" />
             </div>
             <h1 className="text-2xl font-bold text-foreground mb-2">
               Confirming your subscription…
@@ -135,8 +134,8 @@ export default function SubscriptionSuccessPage() {
 
         {stage === 'confirmed' && (
           <>
-            <div className="w-16 h-16 rounded-full bg-[#a3ff00]/10 flex items-center justify-center mx-auto mb-6">
-              <CheckCircle2 size={32} className="text-[#a3ff00]" />
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+              <CheckCircle2 size={32} className="text-primary" />
             </div>
             <h1 className="text-2xl font-bold text-foreground mb-2">
               You're in. Welcome to TikBase Pro.
@@ -146,8 +145,7 @@ export default function SubscriptionSuccessPage() {
             </p>
             <a
               href="#/dashboard"
-              className="inline-block w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors"
-              style={{ backgroundColor: '#a3ff00', color: '#0a0a0c' }}
+              className="inline-block w-full py-3 rounded-lg text-center font-semibold text-sm transition-colors bg-primary text-primary-foreground"
               onClick={(e) => {
                 e.preventDefault();
                 window.location.hash = '#/dashboard';

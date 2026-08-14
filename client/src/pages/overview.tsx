@@ -127,9 +127,8 @@ export default function OverviewPage() {
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
-                                {product.image_url && (
-                                  <img src={product.image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                )}
+                                {/* Proxied, same reason as the products table. */}
+                                <img src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                               </div>
                               <div className="min-w-0">
                                 <p className="text-xs font-medium text-foreground line-clamp-2 leading-snug">{product.title}</p>

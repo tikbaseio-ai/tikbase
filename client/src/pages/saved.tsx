@@ -150,15 +150,14 @@ export default function SavedPage() {
                   className="flex items-center gap-4 p-3 rounded-lg border border-border bg-card"
                   data-testid={`saved-product-${product.product_id}`}
                 >
-                  {product.image_url ? (
-                    <img
-                      src={product.image_url}
-                      alt=""
-                      className="w-12 h-12 rounded object-cover border border-border"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded bg-muted" />
-                  )}
+                  {/* Proxied: a bookmark can outlive the signed CDN URL that
+                      was captured with it by months. */}
+                  <img
+                    src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`}
+                    alt=""
+                    className="w-12 h-12 rounded object-cover border border-border bg-muted"
+                    onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground line-clamp-1">
                       {product.title}

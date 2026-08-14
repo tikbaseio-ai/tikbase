@@ -325,10 +325,10 @@ export default function ProductsPage() {
                 >
                   <div className="flex gap-3.5">
                     <div className="w-16 h-16 rounded-md border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
-                      {product.image_url && (
-                        <img src={product.image_url} alt="" loading="lazy" className="w-full h-full object-cover"
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      )}
+                      <img
+                        src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`}
+                        alt="" loading="lazy" className="w-full h-full object-cover"
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
@@ -481,7 +481,13 @@ export default function ProductsPage() {
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="w-14 h-14 rounded-md border border-border flex-shrink-0 overflow-hidden bg-zinc-800">
-                            {product.image_url && <img src={product.image_url} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
+                            {/* Through the cache-through proxy, not the payload's
+                                image_url: precomputed payloads carry the raw
+                                signed CDN URL and those 403 once the signature
+                                lapses — measured 8 of 20 dead on this page.
+                                Enlarging the box without this only enlarges the
+                                hole. */}
+                            <img src={`/api/thumb?product_id=${encodeURIComponent(product.product_id)}`} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-start gap-1.5">

@@ -527,10 +527,15 @@ export default function ProductsPage() {
 
                       {/* Views — the Trending ranking signal */}
                       <td className="hidden md:table-cell py-3 px-3 text-right">
-                        <div title={m.periodViews.toLocaleString() + ' views from ' + m.periodVideoCount + ' videos posted in this window\n' + m.totalViews.toLocaleString() + ' total views all-time'}>
+                        {/* An em dash covers both "no views" and "we could not
+                            read them"; the tooltip is what tells them apart,
+                            because a zero and an unknown must not look alike. */}
+                        <div title={m.viewsUnknown
+                          ? 'View stats could not be read for this product on the last refresh — this is not zero views'
+                          : (m.periodViews ?? 0).toLocaleString() + ' views from ' + (m.periodVideoCount ?? 0) + ' videos posted in this window\n' + (m.totalViews ?? 0).toLocaleString() + ' total views all-time'}>
                           <span className="font-mono text-xs text-foreground">
-                            {m.periodViews > 0 ? formatCompactNumber(m.periodViews) : (
-                              m.totalViews > 0 ? <span className="text-zinc-500">{formatCompactNumber(m.totalViews)}</span> : <span className="text-zinc-500">—</span>
+                            {(m.periodViews ?? 0) > 0 ? formatCompactNumber(m.periodViews!) : (
+                              (m.totalViews ?? 0) > 0 ? <span className="text-zinc-500">{formatCompactNumber(m.totalViews!)}</span> : <span className="text-zinc-500">—</span>
                             )}
                           </span>
                         </div>

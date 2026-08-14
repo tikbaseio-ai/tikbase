@@ -27,14 +27,32 @@ const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 export const OPPORTUNITY_POOL = 400;
 
 // Products per product_view_stats / product_top_videos call. The top-videos RPC
-// returns up to 5 rows per product, so 150 x 5 = 750 stays under PostgREST's
-// 1000-row response cap — the very cap this replaced.
-const VIEW_STATS_CHUNK = 150;
+// returns up to 5 rows per product, so even 150 x 5 = 750 stayed under
+// PostgREST's 1000-row response cap — the very cap this replaced.
+//
+// 150 was nonetheless too big, for a different reason: the 8s statement_timeout
+// on the `authenticator` role that PostgREST connects as. product_view_stats
+// costs almost nothing warm and everything cold, and the nightly precompute is
+// all cold reads. Measured on never-touched ids, p_days=365, worst of three:
+//
+//   150 ids  2,498 ms cold   (4,431 ms on the top-150 by sold_count)
+//    75 ids    647 ms cold
+//    50 ids    473 ms cold
+//
+// It timed out 5 times in the 2026-08-06 recompute at 150 — cold reads plus
+// contention from the rest of the run. 50 keeps the worst case an order of
+// magnitude under the ceiling, and the extra round trips cost ~40ms each
+// against a combo that already takes minutes.
+const VIEW_STATS_CHUNK = 50;
 
 // Snapshot bounds return up to 2 + |windows| rows per product (~5.8 measured),
 // so 100 products stays comfortably under the same 1000-row cap that broke the
 // read this replaced.
 const SNAPSHOT_CHUNK = 100;
+
+// Pause between an RPC's two attempts. Long enough to let a contended moment
+// pass, short enough that a live request does not visibly stall.
+const RPC_RETRY_DELAY_MS = 400;
 
 // The windows calculateSnapshotDelta asks for: the requested one, plus the
 // shorter ones it falls back to when the requested window has no usable delta.
@@ -161,6 +179,7 @@ function estimateProductMetrics(
   categoryMedianPrice: number,
   snapshots: any[],
   stats: ViewStats | undefined,
+  viewsUnknown = false,
 ) {
   const now = new Date();
   const daysActive = firstSeenDaysActive(product, snapshots, now);
@@ -169,6 +188,9 @@ function estimateProductMetrics(
   // survived PostgREST's 1000-row response cap, which on the top batch meant
   // 2.4% of the rows. `videos` is now just the top 5 thumbnails and must never
   // be used for arithmetic again.
+  // When the RPC could not be read, these stay UNKNOWN. Zeroing them would
+  // assert nobody watched the product, and that assertion is what drops it out
+  // of the ranking below.
   const periodViews = stats?.periodViews ?? 0;
   const periodVideoCount = stats?.periodVideoCount ?? 0;
   const totalViews = stats?.totalViews ?? 0;
@@ -304,6 +326,26 @@ function estimateProductMetrics(
     }
   }
 
+  // A product whose view stats could not be read reports them as null, not 0.
+  // The estimate itself survives only when it came from a measured snapshot
+  // delta — that path never touched views. Otherwise every input to the model
+  // is missing, so the output is null rather than a number the model did not
+  // actually produce.
+  if (viewsUnknown) {
+    return {
+      periodViews: null,
+      periodVideoCount: null,
+      totalViews: null,
+      estPeriodUnitsSold: hasRealDelta ? estPeriodUnitsSold : null,
+      estRevenue: hasRealDelta ? estPeriodUnitsSold * effectivePrice : null,
+      hasRealPrice,
+      hasRealDelta,
+      daysActive,
+      velocityRatio: null,
+      viewsUnknown: true,
+    };
+  }
+
   return {
     periodViews,
     periodVideoCount,
@@ -314,6 +356,7 @@ function estimateProductMetrics(
     hasRealDelta,
     daysActive,
     velocityRatio: totalViews > 0 ? periodViews / totalViews : 0,
+    viewsUnknown: false,
   };
 }
 
@@ -492,6 +535,111 @@ async function readPrecomputed(nicheSlug: string, days: number): Promise<any[] |
   }
 }
 
+/**
+ * One retry, then give up honestly.
+ *
+ * Every RPC here runs against the 8s statement_timeout on `authenticator`, and
+ * the failures observed in production were timeouts under contention rather
+ * than anything deterministic — precisely the shape a retry fixes. The pause is
+ * short: the caller is a nightly job, but it is also a live endpoint.
+ */
+export async function rpcWithRetry(
+  supabase: SupabaseClient,
+  fn: string,
+  args: Record<string, unknown>,
+  label: string,
+): Promise<{ data: any; error: any; attempts: number }> {
+  const first = await supabase.rpc(fn, args);
+  if (!first.error) return { ...first, attempts: 1 };
+
+  console.warn(`  [WARN] ${label} failed (attempt 1/2): ${first.error.message} — retrying`);
+  await new Promise((r) => setTimeout(r, RPC_RETRY_DELAY_MS));
+
+  const second = await supabase.rpc(fn, args);
+  if (!second.error) {
+    console.log(`  ${label} recovered on retry`);
+    return { ...second, attempts: 2 };
+  }
+  return { ...second, attempts: 2 };
+}
+
+export interface ViewStatsResult {
+  stats: Map<string, ViewStats>;
+  /** Products whose view stats could not be read. NOT the same as zero views. */
+  unknown: Set<string>;
+  videos: Record<string, any[]>;
+}
+
+/**
+ * View stats + top-video thumbnails for a product set.
+ *
+ * The rule this exists to enforce: a chunk that fails must leave its products
+ * marked UNKNOWN, never zeroed. A zero here is a claim — "nobody watched this"
+ * — and it is the claim that decides whether a product ranks at all, because
+ * periodViews === 0 short-circuits the estimator to 0 units sold. Five chunks
+ * timed out in the 2026-08-06 recompute; every product in them was published as
+ * if it had been ignored.
+ */
+export async function fetchViewStats(
+  supabase: SupabaseClient,
+  pids: string[],
+  days: number,
+): Promise<ViewStatsResult> {
+  const stats = new Map<string, ViewStats>();
+  const unknown = new Set<string>();
+  const videos: Record<string, any[]> = {};
+
+  for (let i = 0; i < pids.length; i += VIEW_STATS_CHUNK) {
+    const batch = pids.slice(i, i + VIEW_STATS_CHUNK);
+
+    const viewsRes = await rpcWithRetry(
+      supabase,
+      'product_view_stats',
+      { p_days: days, p_product_ids: batch },
+      `product_view_stats chunk ${i / VIEW_STATS_CHUNK}`,
+    );
+    if (viewsRes.error) {
+      console.warn(
+        `  [WARN] product_view_stats chunk ${i / VIEW_STATS_CHUNK} failed twice: ` +
+        `${viewsRes.error.message} — ${batch.length} products marked views-unknown`,
+      );
+      for (const id of batch) unknown.add(String(id));
+    } else {
+      for (const r of (viewsRes.data as any[]) || []) {
+        stats.set(String(r.product_id), {
+          periodViews: Number(r.period_views) || 0,
+          periodVideoCount: Number(r.period_video_count) || 0,
+          totalViews: Number(r.total_views) || 0,
+          videoCount: Number(r.video_count) || 0,
+        });
+      }
+      // A product the RPC simply had no videos for is a real zero, not an
+      // unknown: it answered, and the answer was "none".
+    }
+
+    const topsRes = await rpcWithRetry(
+      supabase,
+      'product_top_videos',
+      { p_product_ids: batch, p_limit: 5 },
+      `product_top_videos chunk ${i / VIEW_STATS_CHUNK}`,
+    );
+    if (topsRes.error) {
+      // Thumbnails only. An empty strip is a cosmetic gap, not a false number,
+      // so this one stays a warning and nothing is marked unknown.
+      console.warn(
+        `  [WARN] product_top_videos chunk ${i / VIEW_STATS_CHUNK} failed twice: ${topsRes.error.message}`,
+      );
+    } else {
+      for (const v of (topsRes.data as any[]) || []) {
+        if (!videos[v.product_id]) videos[v.product_id] = [];
+        videos[v.product_id].push(v);
+      }
+    }
+  }
+
+  return { stats, unknown, videos };
+}
+
 export async function computeTopProducts(
   nicheSlug: string,
   days: number,
@@ -556,41 +704,14 @@ export async function computeTopProducts(
   // Aggregating server-side returns one row per product instead of one per
   // video, so there is nothing to truncate. Thumbnails come from a second RPC
   // that gives each product its own top N rather than the batch's top N.
-  const viewStats = new Map<string, {
-    periodViews: number; periodVideoCount: number; totalViews: number; videoCount: number;
-  }>();
-
-  for (let i = 0; i < pids.length; i += VIEW_STATS_CHUNK) {
-    const batch = pids.slice(i, i + VIEW_STATS_CHUNK);
-    const { data: stats, error: statsErr } = await supabase.rpc('product_view_stats', {
-      p_days: days,
-      p_product_ids: batch,
-    });
-    if (statsErr) {
-      console.warn(`  [WARN] product_view_stats chunk failed: ${statsErr.message}`);
-    } else {
-      for (const r of (stats as any[]) || []) {
-        viewStats.set(String(r.product_id), {
-          periodViews: Number(r.period_views) || 0,
-          periodVideoCount: Number(r.period_video_count) || 0,
-          totalViews: Number(r.total_views) || 0,
-          videoCount: Number(r.video_count) || 0,
-        });
-      }
-    }
-
-    const { data: tops, error: topsErr } = await supabase.rpc('product_top_videos', {
-      p_product_ids: batch,
-      p_limit: 5,
-    });
-    if (topsErr) {
-      console.warn(`  [WARN] product_top_videos chunk failed: ${topsErr.message}`);
-    } else {
-      for (const v of (tops as any[]) || []) {
-        if (!videoMap[v.product_id]) videoMap[v.product_id] = [];
-        videoMap[v.product_id].push(v);
-      }
-    }
+  const { stats: viewStats, unknown: viewsUnknown, videos: topVideoRows } =
+    await fetchViewStats(supabase, pids, days);
+  for (const [pid, rows] of Object.entries(topVideoRows)) videoMap[pid] = rows;
+  if (viewsUnknown.size) {
+    console.warn(
+      `  [WARN] ${viewsUnknown.size} of ${pids.length} products have unknown view stats ` +
+      `— reported as unknown, not zero`,
+    );
   }
 
   for (let i = 0; i < pids.length; i += SNAPSHOT_CHUNK) {
@@ -655,6 +776,7 @@ export async function computeTopProducts(
     const snapshots = snapMap[p.product_id] || [];
     const metrics = estimateProductMetrics(
       p, videos, days, medianPrice, snapshots, viewStats.get(String(p.product_id)),
+      viewsUnknown.has(String(p.product_id)),
     );
     // Get top 5 video thumbnails — fall back to product image if video has no cover
     const topVideos = videos.slice(0, 5).map((v: any) => ({
@@ -682,17 +804,32 @@ export async function computeTopProducts(
     };
   });
 
-  // 4. Sort by estimated revenue (default)
-  enriched.sort(
+  // 4. Drop the products we could not measure at all, rather than rank them.
+  //    A views-unknown product with a measured snapshot delta still has a real
+  //    revenue estimate and stays. One with neither has nothing to rank on, and
+  //    leaving it in would put it at the bottom of the table — indistinguishable
+  //    from a product nobody watched, which is exactly the false claim this
+  //    whole change exists to remove. It is omitted and counted instead.
+  const ranked = enriched.filter((r: any) => r.metrics.estRevenue != null);
+  const omitted = enriched.length - ranked.length;
+  if (omitted > 0) {
+    console.warn(
+      `  [WARN] ${omitted} product(s) omitted from ${nicheSlug}:${days} — view stats ` +
+      `unreadable and no snapshot delta to fall back on`,
+    );
+  }
+
+  // 5. Sort by estimated revenue (default)
+  ranked.sort(
     (a: any, b: any) => (b.metrics.estRevenue || 0) - (a.metrics.estRevenue || 0),
   );
 
-  // 5. Opportunity badge, over the slice that actually gets stored and shown —
+  // 6. Opportunity badge, over the slice that actually gets stored and shown —
   //    see annotateOpportunity for why the thresholds come from the payload
   //    rather than the full ranked list.
-  const pool = enriched.slice(0, OPPORTUNITY_POOL);
+  const pool = ranked.slice(0, OPPORTUNITY_POOL);
   const thresholds = annotateOpportunity(pool);
-  for (const r of enriched.slice(OPPORTUNITY_POOL)) r.opportunity = false;
+  for (const r of ranked.slice(OPPORTUNITY_POOL)) r.opportunity = false;
   console.log(
     `    opportunity ${nicheSlug}:${days} — revenue p75 ` +
     // An empty payload has no p75; Infinity is correct arithmetic and useless
@@ -701,7 +838,7 @@ export async function computeTopProducts(
     `creator median ${thresholds.creatorMedian}, ${thresholds.badged}/${pool.length} badged`,
   );
 
-  return enriched;
+  return ranked;
 }
 
 // Server-side entitlement gate. The full Pro dataset used to be publicly
@@ -857,9 +994,12 @@ export default async function handler(
       sorted = [...products].sort((a, b) => {
         let aVal: number, bVal: number;
         switch (sortBy) {
-          case 'periodViews': aVal = a.metrics.periodViews; bVal = b.metrics.periodViews; break;
-          case 'sold_count': aVal = a.metrics.estPeriodUnitsSold; bVal = b.metrics.estPeriodUnitsSold; break;
-          case 'estRevenue': aVal = a.metrics.estRevenue; bVal = b.metrics.estRevenue; break;
+          // -1 for an unknown, the same convention the window columns below
+          // use: it sorts under a genuine 0 rather than over it, so a product
+          // whose stats could not be read never outranks one measured at zero.
+          case 'periodViews': aVal = a.metrics.periodViews ?? -1; bVal = b.metrics.periodViews ?? -1; break;
+          case 'sold_count': aVal = a.metrics.estPeriodUnitsSold ?? -1; bVal = b.metrics.estPeriodUnitsSold ?? -1; break;
+          case 'estRevenue': aVal = a.metrics.estRevenue ?? -1; bVal = b.metrics.estRevenue ?? -1; break;
           case 'stock_quantity': aVal = a.stock_quantity || 0; bVal = b.stock_quantity || 0; break;
           // Lifetime units, distinct from 'sold_count' above which is the
           // window's estimated units.

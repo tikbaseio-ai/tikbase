@@ -8,7 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "test": "node --test pipeline/*.test.js"
+    "test": "node --import tsx --test pipeline/*.test.js api/*.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

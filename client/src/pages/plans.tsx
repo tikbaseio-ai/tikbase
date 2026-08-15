@@ -3,16 +3,38 @@ import { Check, X, Tag, Loader2 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
 import { useAuth } from '@/lib/auth';
 
+// Checked against what the API actually enforces, feature by feature, rather
+// than inherited from the #19-era copy. Two claims were removed because they
+// are not true: "Export data (CSV)" — there is no CSV export anywhere in the
+// codebase — and "Unlimited bookmarks" as a Pro perk, when free users have the
+// same unlimited bookmarks. Selling a button that does not exist is the fastest
+// way to earn a refund request.
+//
+// Free-tier numbers are the server-side constants: FREE_ROWS 10 in
+// api/top-products.ts, 5 creators, 3 videos, FREE_PRODUCTS 3 on a brand or
+// creator page.
 const FEATURES = [
-  { name: 'Top 10 products & videos, live 7-day data (with revenue estimates)', free: true, pro: true },
-  { name: 'Top 50+ videos per niche', free: false, pro: true },
-  { name: 'Product analytics', free: false, pro: true },
-  { name: 'Revenue estimates', free: false, pro: true },
-  { name: 'Unlimited bookmarks', free: false, pro: true },
-  { name: 'Product stock tracking', free: false, pro: true },
-  { name: 'Advanced timeframe filters', free: false, pro: true },
-  { name: 'Export data (CSV)', free: false, pro: true },
-  { name: 'Priority support', free: false, pro: true },
+  { name: "Today's top 10 products, all categories, 7-day window", free: true, pro: true },
+  { name: 'Product, creator and brand search', free: true, pro: true },
+  { name: 'Saved products and videos', free: true, pro: true },
+  { name: 'All 400 ranked products per category', free: false, pro: true },
+  { name: 'All 20 categories', free: false, pro: true },
+  { name: 'Every timeframe: 7d, 14d, 30d, 90d, 180d, 1 year', free: false, pro: true },
+  { name: '7-day and 30-day GMV, with measured-vs-modeled confidence', free: false, pro: true },
+  { name: 'Opportunity badges — proven demand, few creators on it', free: false, pro: true },
+  { name: 'Top Affiliates leaderboard with modeled creator GMV', free: false, pro: true },
+  { name: 'Creator profiles — full catalogue and top videos', free: false, pro: true },
+  { name: 'Brand pages — a shop\u2019s whole catalogue and its 30-day GMV', free: false, pro: true },
+  { name: 'Every video driving a product, not just the first three', free: false, pro: true },
+  { name: 'Video scripts — the spoken transcript of any video', free: false, pro: true },
+  { name: 'Stock levels and price history', free: false, pro: true },
+];
+
+// Published list prices, checked 2026-08-15. The point of the row is not that
+// we are cheaper — it is that it is one login instead of two tabs.
+const COMPARISON = [
+  { what: 'Product & sales data', them: 'Kalodata Starter', price: '$45.90/mo' },
+  { what: 'Daily viral video picks', them: 'The Daily Virals', price: '~$55/mo' },
 ];
 
 export default function PlansPage() {
@@ -202,6 +224,42 @@ export default function PlansPage() {
             ))}
           </ul>
         </div>
+      </div>
+
+      {/* The comparison, on the page where the decision gets made. */}
+      <div className="mt-10 rounded-lg border border-border overflow-hidden max-w-3xl mx-auto" data-testid="price-comparison">
+        <div className="px-5 py-3 border-b border-border bg-card/50">
+          <p className="text-sm font-semibold text-foreground">What TikBase replaces</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Two subscriptions, two tabs, two logins — or one.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <tbody>
+              {COMPARISON.map(c => (
+                <tr key={c.them} className="border-b border-border/60">
+                  <td className="py-3 pl-5 pr-3 text-muted-foreground whitespace-nowrap">{c.what}</td>
+                  <td className="py-3 px-3 text-foreground whitespace-nowrap">{c.them}</td>
+                  <td className="py-3 pr-5 text-right font-mono text-foreground whitespace-nowrap">{c.price}</td>
+                </tr>
+              ))}
+              <tr className="border-b border-border/60">
+                <td className="py-3 pl-5 pr-3 font-semibold text-foreground whitespace-nowrap">Their total</td>
+                <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">two tabs, two logins</td>
+                <td className="py-3 pr-5 text-right font-mono font-semibold text-foreground whitespace-nowrap">~$101/mo</td>
+              </tr>
+              <tr>
+                <td className="py-3 pl-5 pr-3 font-semibold text-foreground whitespace-nowrap">TikBase Pro</td>
+                <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">one login</td>
+                <td className="py-3 pr-5 text-right font-mono font-bold text-primary whitespace-nowrap">$44.99/mo</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="px-5 py-3 text-[11px] text-muted-foreground border-t border-border">
+          Competitor prices are their published list prices, checked 2026-08-15.
+        </p>
       </div>
 
       {/* Manage existing subscription */}

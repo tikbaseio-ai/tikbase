@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabaseAuth } from './supabaseAuth';
+import { getReferral, clearReferral } from './referral';
 
 interface AuthState {
   session: Session | null;
@@ -46,14 +47,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signUpWithEmail(email: string, password: string) {
-    const { error } = await supabaseAuth.auth.signUp({ email, password });
+    // Attribution rides along in user_metadata, which the user's own token can
+    // write. app_metadata is service-role only and is where the webhook keeps
+    // the subscription — a referral code is a claim about where someone came
+    // from, not an entitlement, so it belongs on the user side.
+    const referral = getReferral();
+    const { error } = await supabaseAuth.auth.signUp({
+      email,
+      password,
+      options: referral ? { data: { referral } } : undefined,
+    });
+    if (!error && referral) clearReferral();
     return { error: error as Error | null };
   }
 
   async function signInWithGoogle() {
+    // The OAuth round trip loses localStorage on some browsers, so the code
+    // goes out on the redirect URL and captureReferral() picks it back up.
+    const referral = getReferral();
+    const redirectTo = referral
+      ? `${window.location.origin}/?via=${encodeURIComponent(referral.code)}`
+      : window.location.origin;
     const { error } = await supabaseAuth.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo },
     });
     return { error: error as Error | null };
   }

@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response } from "express";
 import { type Server } from "http";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -12,6 +12,7 @@ import creatorProfileHandler from "../api/creator-profile";
 import productSearchHandler from "../api/product-search";
 import brandSearchHandler from "../api/brand-search";
 import brandProfileHandler from "../api/brand-profile";
+import { isUpstreamOutage, unavailable } from "../api/_lib/upstream.js";
 import productDetailHandler from "../api/product-detail";
 import videoTranscriptHandler from "../api/video-transcript";
 
@@ -32,13 +33,23 @@ function getSupabaseAdmin(): SupabaseClient {
 
 // Verify the caller's Supabase access token and return their user id, or null.
 // Never trust a client-supplied user_id for per-user actions.
-async function getAuthedUserId(req: Request): Promise<string | null> {
+/** 'outage' is not the same answer as null: null means "not signed in". */
+async function getAuthedUserId(req: Request): Promise<string | null | "outage"> {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (!token) return null;
   const { data, error } = await getSupabaseAdmin().auth.getUser(token);
+  if (error && isUpstreamOutage(error)) return "outage";
   if (error || !data.user) return null;
   return data.user.id;
+}
+
+/** Mirrors api/check-subscription.ts — a 503 is a fact, isPaid:false is a claim. */
+function serveUnavailable(res: Response) {
+  const u = unavailable();
+  res.setHeader("Retry-After", u.retryAfter);
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(u.status).json(u.body);
 }
 
 const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
@@ -583,10 +594,12 @@ export async function registerRoutes(
   app.get("/api/check-subscription", async (req, res) => {
     try {
       const userId = await getAuthedUserId(req);
+      if (userId === "outage") return serveUnavailable(res);
       if (!userId) return res.json({ isPaid: false });
 
       const supabase = getSupabaseAdmin();
       const { data, error } = await supabase.auth.admin.getUserById(userId);
+      if (error && isUpstreamOutage(error)) return serveUnavailable(res);
       if (error || !data.user) return res.json({ isPaid: false });
       const meta = (data.user.app_metadata as Record<string, any>) || {};
       let sub: StoredSubscription | undefined = meta.subscription;
@@ -618,9 +631,23 @@ export async function registerRoutes(
         }
       }
 
-      return res.json({ isPaid: isPaidStatus(sub?.status) });
+      const referral = (data.user.user_metadata as Record<string, any> | null)?.referral;
+      return res.json({
+        isPaid: isPaidStatus(sub?.status),
+        ...(referral?.code
+          ? {
+              referral: {
+                code: String(referral.code),
+                param: referral.param ?? null,
+                landedAt: referral.landedAt ?? null,
+                signedUpAt: data.user.created_at ?? null,
+              },
+            }
+          : {}),
+      });
     } catch (err: any) {
       console.error("check-subscription exception:", err.message);
+      if (isUpstreamOutage(err)) return serveUnavailable(res);
       return res.json({ isPaid: false });
     }
   });

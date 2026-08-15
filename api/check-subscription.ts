@@ -105,10 +105,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     if (!token) return res.json({ isPaid: false });
     const { data: authData, error: authError } = await supabase.auth.getUser(token);
+    // A token we cannot CHECK is different from a token that is invalid. Only
+    // the second one means "free".
+    if (authError && isUpstreamOutage(authError)) return serveUnavailable(res);
     if (authError || !authData.user) return res.json({ isPaid: false });
     const userId = authData.user.id;
 
     const { data, error } = await supabase.auth.admin.getUserById(userId);
+    if (error && isUpstreamOutage(error)) return serveUnavailable(res);
     if (error || !data.user) return res.json({ isPaid: false });
 
     const meta = (data.user.app_metadata as Record<string, any>) || {};
@@ -139,9 +143,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const isPaid = !!sub?.status && ACTIVE_STATUSES.has(sub.status);
-    return res.json({ isPaid });
+
+    // Referral attribution, surfaced for whoever ends up owning payouts. It is
+    // read from user_metadata (the signup writes it there) and echoed only to
+    // the authenticated owner of the account — this endpoint already derives
+    // the user from a verified token, so there is nobody else to leak it to.
+    const referral = (data.user.user_metadata as Record<string, any> | null)?.referral;
+    return res.json({
+      isPaid,
+      ...(referral?.code
+        ? {
+            referral: {
+              code: String(referral.code),
+              param: referral.param ?? null,
+              landedAt: referral.landedAt ?? null,
+              signedUpAt: data.user.created_at ?? null,
+            },
+          }
+        : {}),
+    });
   } catch (err: any) {
     console.error('check-subscription exception:', err?.message);
+    // The whole point: a paying customer must never be told isPaid:false
+    // because the database was unreachable.
+    if (isUpstreamOutage(err)) return serveUnavailable(res);
     return res.json({ isPaid: false });
   }
+}
+
+function serveUnavailable(res: VercelResponse) {
+  const u = unavailable();
+  res.setHeader('Retry-After', u.retryAfter);
+  res.setHeader('Cache-Control', 'no-store');
+  console.error('check-subscription: upstream unreachable — answering 503 rather than isPaid:false');
+  return res.status(u.status).json(u.body);
 }

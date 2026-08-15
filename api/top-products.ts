@@ -12,6 +12,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { isUpstreamOutage, unavailable } from './_lib/upstream.js';
 
 interface CachedResult {
   products: any[];
@@ -1023,6 +1024,23 @@ export default async function handler(
     // callers. 'private' keeps it browser-only; rankings_cache keeps it fast.
     res.setHeader('Cache-Control', 'private, max-age=300');
 
+    // An empty catalogue is a claim, and during the 2026-08-09 outage it was a
+    // false one: every read inside computeTopProducts failed, each swallowed
+    // into an empty array, and the endpoint answered 200 {"products":[]} —
+    // "there is nothing selling on TikTok Shop today". Before saying that, make
+    // sure we can still reach the database at all. One cheap row, only on the
+    // path that would otherwise assert emptiness.
+    if (sorted.length === 0) {
+      const reachable = await databaseReachable();
+      if (!reachable) {
+        const u = unavailable();
+        res.setHeader('Retry-After', u.retryAfter);
+        res.setHeader('Cache-Control', 'no-store');
+        console.error('top-products: empty result AND the database is unreachable — answering 503');
+        return res.status(u.status).json(u.body);
+      }
+    }
+
     return res.json({
       products: sorted.slice(offset, offset + limit),
       total: sorted.length, // honest full count even when the page is truncated
@@ -1031,6 +1049,26 @@ export default async function handler(
     });
   } catch (err: any) {
     console.error('top-products error:', err?.message);
+    if (isUpstreamOutage(err)) {
+      const u = unavailable();
+      res.setHeader('Retry-After', u.retryAfter);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(u.status).json(u.body);
+    }
     return res.status(500).json({ error: 'Failed to fetch products' });
+  }
+}
+
+/** One row, one round trip. False only when the failure looks upstream. */
+async function databaseReachable(): Promise<boolean> {
+  try {
+    const { error } = await getAdminClient()
+      .from('products')
+      .select('product_id')
+      .limit(1);
+    if (error && isUpstreamOutage(error)) return false;
+    return true;
+  } catch (err) {
+    return !isUpstreamOutage(err);
   }
 }

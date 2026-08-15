@@ -153,7 +153,12 @@ export async function computeTopVideos(nicheSlug: string, days: number): Promise
         video_url: v.video_url,
         view_count: v.view_count,
         author_name: v.author_name,
+        // The signed CDN url is kept for compatibility with payloads written
+        // before this change, but it 403s within a day of being captured —
+        // measured 20 of 20 rows dead. creator_key is what the client should
+        // use: /api/avatar?key= serves stored bytes and always renders.
         author_avatar_url: v.author_avatar_url,
+        creator_key: v.creator_key ?? null,
         cover_image_url: v.cover_image_url,
         created_at: v.created_at,
         product,

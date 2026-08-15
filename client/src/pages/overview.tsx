@@ -220,8 +220,11 @@ export default function OverviewPage() {
                       </div>
                       <div className="p-2.5">
                         <div className="flex items-center gap-1.5 mb-1">
-                          {video.author_avatar_url ? (
-                            <img src={video.author_avatar_url} alt="" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+                          {video.creator_key ? (
+                            /* Proxied: the payload's author_avatar_url is a signed
+                               CDN link that 403s within a day — 20 of 20 measured
+                               dead. A stored avatar always renders. */
+                            <img src={`/api/avatar?key=${encodeURIComponent(video.creator_key)}`} alt="" loading="lazy" className="w-5 h-5 rounded-full object-cover flex-shrink-0 bg-muted" />
                           ) : (
                             <div className="w-5 h-5 rounded-full bg-muted flex-shrink-0" />
                           )}

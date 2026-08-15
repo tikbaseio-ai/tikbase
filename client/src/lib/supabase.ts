@@ -101,6 +101,8 @@ export interface ProductVideo {
   view_count: number;
   author_name: string;
   author_avatar_url: string;
+  /** Stable identity for /api/avatar. Null on payloads written before 2026-08-15. */
+  creator_key?: string | null;
   created_at: string;
   cover_image_url: string;
 }

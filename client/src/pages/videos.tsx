@@ -274,11 +274,12 @@ export default function VideosPage() {
                   {/* Video info */}
                   <div className="p-3">
                     <div className="flex items-center gap-2 mb-2">
-                      {video.author_avatar_url ? (
+                      {video.creator_key ? (
                         <img
-                          src={video.author_avatar_url}
+                          src={`/api/avatar?key=${encodeURIComponent(video.creator_key)}`}
                           alt=""
-                          className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                          loading="lazy"
+                          className="w-6 h-6 rounded-full object-cover flex-shrink-0 bg-muted"
                         />
                       ) : (
                         <div className="w-6 h-6 rounded-full bg-muted flex-shrink-0" />

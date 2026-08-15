@@ -48,8 +48,10 @@ export function ScriptButton({
       });
       const data = await res.json().catch(() => ({}));
 
-      if (res.status === 402) {
+      if (res.status === 403 || res.status === 402) {
         // Server-enforced Pro gate. The UI mirrors it; it does not create it.
+        // 402 is still accepted so a browser holding a cached response from
+        // before the status changed does not fall through to the error state.
         setState({ status: 'locked', lines: [], message: data?.message });
         return;
       }

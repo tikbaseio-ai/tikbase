@@ -201,7 +201,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // spends money per click, so the gate is here, not in the UI.
     if (tier !== 'paid') {
       res.setHeader('Cache-Control', 'private, max-age=300');
-      return res.status(402).json({
+      // 403, not 402. The client's outage guard treats ANY 402 as "the project
+      // is restricted" and flips the whole app to the maintenance screen —
+      // 402 is what Supabase returns for a capped project. This endpoint was
+      // the one place in the app that could hand a browser a 402, so a free
+      // user clicking Script was one paywall-bypass away from blacking out the
+      // site for themselves. Nothing reads the status but the guard and this
+      // page's own handler, both updated.
+      return res.status(403).json({
         error: 'upgrade_required',
         feature: 'transcript',
         message: 'Reading a video’s script is a Pro feature.',

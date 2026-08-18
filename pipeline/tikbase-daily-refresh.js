@@ -151,8 +151,13 @@ const stats = {
   phase2_birth_snapshots: 0,
   phase3_snapshots: 0,
   phase3_rotation_advanced: 0,
-  phase3_member_max_age: 0,
-  phase3_members_over_warn: 0,
+  // null, not 0: "not measured" and "measured at zero" are different facts,
+  // and printing the second when the first is true is what hid a broken
+  // monitor for three nights.
+  phase3_member_ages_known: false,
+  phase3_member_max_age: null,
+  phase3_members_over_warn: null,
+  phase3_monitor_error: null,
   phase3_404_flagged: 0,
   phase3_404_first_strike: 0,
   phase3_related_inserted: 0,
@@ -1188,39 +1193,65 @@ async function fetchEligible({ column, ascending, nullsFirst, limit, label }) {
 // exactly what the next run picks up first. The banner is a signal to raise
 // SNAPSHOT_ROTATION_LIMIT (or add per-niche hot coverage), not an incident.
 async function reportMembershipAges() {
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
+  // Chunked by cache_key, because the whole view cannot be read inside the 8s
+  // statement_timeout that PostgREST's `authenticator` role carries. Measured
+  // on production: the full view is 11.9s, deduping first is 6.7s, a
+  // server-side loop is 11.0s — and a single key is 10ms. Same cap and same
+  // shape of fix as refresh_creator_counts. See the 2026-08-15 migration.
+  //
+  // The other half of the bug was worse than the timeout: this function used to
+  // `return` on failure while stats.phase3_member_max_age sat at its
+  // initialiser, so the summary printed "Member max age: 0d (>9d: 0)" — the
+  // best possible number, produced by the check not running. Ages now start
+  // UNKNOWN and only a completed sweep may set them.
+  const CHUNK_KEYS = 2; // 400 rows per key; two stays under the 1000-row cap
+
+  let keys;
+  {
     const { data, error } = await supabase
-      .from("rankings_cache_members")
-      .select("product_id,last_snapshot_date")
-      .range(from, from + 999);
-    if (error) {
-      console.error(
-        `  [WARN] Membership monitor unavailable: ${error.message}\n` +
-        `         (run pipeline/last-snapshot-date.sql to enable it)`
-      );
-      return;
-    }
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < 1000) break;
+      .from("rankings_cache")
+      .select("cache_key")
+      .order("cache_key");
+    if (error) return monitorFailed(`could not list cache keys: ${error.message}`);
+    keys = (data || []).map((r) => r.cache_key);
   }
-  if (!rows.length) {
+  if (!keys.length) {
     console.log("  Membership monitor: rankings_cache is empty — nothing to check");
+    stats.phase3_member_ages_known = true;
+    stats.phase3_member_max_age = 0;
+    stats.phase3_members_over_warn = 0;
     return;
   }
+
+  // product_id -> last_snapshot_date. A product sits in many payloads; the Map
+  // is what makes the counts distinct members rather than payload rows.
+  const seen = new Map();
+  const startedAt = Date.now();
+  for (let i = 0; i < keys.length; i += CHUNK_KEYS) {
+    const batch = keys.slice(i, i + CHUNK_KEYS);
+    const { data, error } = await supabase.rpc("rankings_member_ages", {
+      p_keys: batch,
+    });
+    if (error) {
+      return monitorFailed(
+        `chunk ${i / CHUNK_KEYS + 1}/${Math.ceil(keys.length / CHUNK_KEYS)} ` +
+        `(${batch.join(", ")}) failed: ${error.message}`
+      );
+    }
+    for (const r of data || []) seen.set(r.product_id, r.last_snapshot_date);
+  }
+  const sweepSecs = ((Date.now() - startedAt) / 1000).toFixed(1);
 
   // Age in days from the cursor. A null cursor means never snapshotted, which
   // is unbounded staleness, not zero — score it as Infinity so it cannot hide
   // inside a percentile.
   const todayMs = Date.parse(today());
-  const aged = rows.map((r) => ({
-    product_id: r.product_id,
-    age: r.last_snapshot_date
-      ? (todayMs - Date.parse(r.last_snapshot_date)) / 86400000
-      : Infinity,
-  }));
-  aged.sort((a, b) => a.age - b.age);
+  const aged = [...seen.entries()]
+    .map(([product_id, last]) => ({
+      product_id,
+      age: last ? (todayMs - Date.parse(last)) / 86400000 : Infinity,
+    }))
+    .sort((a, b) => a.age - b.age);
 
   const never = aged.filter((a) => a.age === Infinity).length;
   const finite = aged.filter((a) => a.age !== Infinity);
@@ -1230,12 +1261,13 @@ async function reportMembershipAges() {
   const breaching = aged.filter((a) => a.age > MEMBER_AGE_SLA_DAYS);
 
   const fmt = (v) => (v === Infinity ? "never" : `${v.toFixed(1)}d`);
+  stats.phase3_member_ages_known = true;
   stats.phase3_member_max_age = max === Infinity ? -1 : Math.round(max * 10) / 10;
   stats.phase3_members_over_warn = overWarn;
 
   console.log(
-    `  Membership monitor: ${rows.length} served products | ` +
-    `max ${fmt(max)} | p95 ${fmt(p95)} | ` +
+    `  Membership monitor: ${aged.length} served products in ${keys.length} payloads ` +
+    `(${sweepSecs}s) | max ${fmt(max)} | p95 ${fmt(p95)} | ` +
     `>${MEMBER_AGE_WARN_DAYS}d: ${overWarn}` +
     (never ? ` | never snapshotted: ${never}` : "") +
     (finite.length ? ` | median ${fmt(finite[Math.floor(finite.length / 2)].age)}` : "")
@@ -1258,6 +1290,24 @@ async function reportMembershipAges() {
       `  ${"!".repeat(60)}\n`
     );
   }
+}
+
+/**
+ * The only exit for a monitor that did not finish. Loud, and it leaves the
+ * stats UNKNOWN rather than at a healthy-looking default — a broken alarm must
+ * never be indistinguishable from a clean result.
+ */
+function monitorFailed(why) {
+  stats.phase3_member_ages_known = false;
+  stats.phase3_monitor_error = why;
+  console.error(
+    `\n  ${"!".repeat(60)}\n` +
+    `  MONITOR FAILED — ages UNKNOWN\n` +
+    `  ${why}\n` +
+    `  Snapshot ages for ranked products were NOT measured this run. This is\n` +
+    `  not a clean result; nothing here says the SLA is being met.\n` +
+    `  ${"!".repeat(60)}\n`
+  );
 }
 
 async function phase3(limitOverride) {
@@ -1715,7 +1765,15 @@ async function main() {
   console.log(`  Phase 2 — Birth snapshots:      ${stats.phase2_birth_snapshots}`);
   console.log(`  Phase 3 — Snapshots created:    ${stats.phase3_snapshots}`);
   console.log(`  Phase 3 — Rotation advanced:    ${stats.phase3_rotation_advanced}`);
-  console.log(`  Phase 3 — Member max age:       ${stats.phase3_member_max_age < 0 ? "never-snapshotted present" : stats.phase3_member_max_age + "d"} (>${MEMBER_AGE_WARN_DAYS}d: ${stats.phase3_members_over_warn})`);
+  console.log(
+    `  Phase 3 — Member max age:       ` +
+    (!stats.phase3_member_ages_known
+      ? `UNKNOWN — MONITOR FAILED (${stats.phase3_monitor_error || "see above"})`
+      : (stats.phase3_member_max_age < 0
+          ? "never-snapshotted present"
+          : stats.phase3_member_max_age + "d") +
+        ` (>${MEMBER_AGE_WARN_DAYS}d: ${stats.phase3_members_over_warn})`)
+  );
   console.log(`  Phase 3 — 404 flagged/1st strike: ${stats.phase3_404_flagged} / ${stats.phase3_404_first_strike}`);
   console.log(`  Phase 3 — Related vids inserted: ${stats.phase3_related_inserted}`);
   console.log(`  Phase 3 — Related vids updated:  ${stats.phase3_related_updated}`);

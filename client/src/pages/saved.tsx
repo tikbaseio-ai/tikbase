@@ -94,11 +94,12 @@ export default function SavedPage() {
                   </div>
                   <div className="p-3">
                     <div className="flex items-center gap-2 mb-2">
-                      {video.author_avatar_url ? (
+                      {video.creator_key ? (
                         <img
-                          src={video.author_avatar_url}
+                          src={`/api/avatar?key=${encodeURIComponent(video.creator_key)}`}
                           alt=""
-                          className="w-5 h-5 rounded-full object-cover"
+                          loading="lazy"
+                          className="w-5 h-5 rounded-full object-cover bg-muted"
                         />
                       ) : (
                         <div className="w-5 h-5 rounded-full bg-muted" />

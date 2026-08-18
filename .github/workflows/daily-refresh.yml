@@ -6,13 +6,27 @@ on:
   workflow_dispatch: # Allow manual trigger
 
 jobs:
+  # SPLIT INTO TWO JOBS, and the reason is arithmetic rather than taste.
+  #
+  # The 2026-08-15 scheduled run was CANCELLED at exactly 240.3 minutes, mid-way
+  # through "Precompute creator leaderboard" — it hit this timeout. Step timings
+  # from the last run that finished (2026-08-14, 206.6 min total):
+  #
+  #   pipeline, phases 1-5        52.7 min
+  #   discover videos             32.4 min
+  #   precompute rankings        104.3 min
+  #   precompute creators         16.8 min
+  #
+  # 85 minutes of ingestion and 121 of precompute, sharing one 240-minute
+  # budget: 33 minutes of headroom, 16%. A catch-up night — more rotation
+  # backlog, more products to snapshot — spends that and the precompute is
+  # killed after the credits have already been paid for.
+  #
+  # Two jobs give each side its own 240: ingestion has 2.8x headroom, precompute
+  # 2.0x. Nothing is passed between them but the database, so `needs` is the
+  # whole handoff. GitHub bills minutes used, so this costs the same.
   refresh:
     runs-on: ubuntu-latest
-    # Phase 3 now snapshots 6,000 products/run (hot + rotation) instead of 3,000.
-    # At the measured ~3.49 products/sec that is ~29 min of Phase 3 versus ~14,
-    # and observed end-to-end runs already ranged 137-165 min against the old
-    # 180-minute cap. Raised to leave real headroom — GitHub only bills the
-    # minutes actually used, so a higher ceiling costs nothing on a normal run.
     timeout-minutes: 240
 
     steps:
@@ -61,6 +75,25 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DISCOVER_LIMIT: "150"
         run: node pipeline/discover-videos.js
+
+  # Precompute runs only if ingestion succeeded — ranking yesterday's data over
+  # a half-written snapshot set would be worse than ranking it late.
+  precompute:
+    needs: refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
 
       # Precompute Top Products/Videos rankings into rankings_cache so the API
       # serves instant reads. Runs LAST, over the freshly-collected data. Reads

@@ -30,11 +30,12 @@ const FEATURES = [
   { name: 'Stock levels and price history', free: false, pro: true },
 ];
 
-// Published list prices, checked 2026-11-12. These are alternative tools, not
-// a stack, so the table does not add them. Kalodata Starter is the US monthly
-// price. FastMoss Basic is $49/mo after a lower first month.
+// Published list prices, checked 2026-11-12, logged in, US. These are
+// alternative tools, not a stack, so the table does not add them. Kalodata
+// Starter is $59.90/mo billed monthly ($49.92/mo yearly); the row is the
+// monthly list price. FastMoss Basic is $49/mo after a lower first month.
 const COMPARISON = [
-  { what: 'Product and sales data', them: 'Kalodata Starter', price: '$45.90/mo' },
+  { what: 'Product and sales data', them: 'Kalodata Starter', price: '$59.90/mo' },
   { what: 'Product and sales data', them: 'FastMoss Basic', price: '$49/mo' },
 ];
 
@@ -254,7 +255,7 @@ export default function PlansPage() {
           </table>
         </div>
         <p className="px-5 py-3 text-[11px] text-muted-foreground border-t border-border">
-          Published list prices, checked 2026-11-12. FastMoss Basic is $49/mo after a lower first month.
+          Published list prices, checked 2026-11-12. Kalodata Starter is $59.90/mo billed monthly. FastMoss Basic is $49/mo after a lower first month.
         </p>
       </div>
 

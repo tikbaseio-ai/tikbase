@@ -34,11 +34,12 @@ export default function LandingPage() {
             <h1 className="font-['Space_Grotesk'] text-5xl md:text-7xl font-bold tracking-tight mb-8 max-w-4xl" style={{ lineHeight: 1.05 }}>
               TikTok Shop research, in one login.
             </h1>
-            {/* Published list prices, checked 2026-11-12. Kalodata Starter is
-                the US monthly price. FastMoss Basic is $49/mo after a lower
-                first month, so $49 is the price it starts at ongoing. */}
+            {/* Published list prices, checked 2026-11-12 while logged in, US.
+                Kalodata Starter is $59.90/mo billed monthly ($49.92/mo yearly);
+                the figure here is the monthly list price. FastMoss Basic is
+                $49/mo after a lower first month. */}
             <p className="text-[#adaaad] text-lg md:text-xl max-w-2xl mb-6 leading-relaxed" style={{ fontFamily: "'Inter', sans-serif" }}>
-              Kalodata Starter is <span className="text-white font-semibold">$45.90/mo</span>. FastMoss starts at <span className="text-white font-semibold">$49/mo</span>. TikBase Pro is <span className="text-white font-semibold">$44.99</span>, and the catalogue is rebuilt once a night.
+              Kalodata Starter is <span className="text-white font-semibold">$59.90/mo</span>. FastMoss starts at <span className="text-white font-semibold">$49/mo</span>. TikBase Pro is <span className="text-white font-semibold">$44.99</span>, and the catalogue is rebuilt once a night.
             </p>
             <div className="mb-3">
               <DataFreshness tone="marketing" />
@@ -71,8 +72,8 @@ export default function LandingPage() {
 
         {/* Entry prices, side by side. Not a sum: Kalodata and FastMoss are
             alternatives, and adding them would describe a bill nobody pays.
-            Checked 2026-11-12. Kalodata Starter is the US monthly price.
-            FastMoss Basic is $49/mo after a lower first month. */}
+            Checked 2026-11-12, logged in, US. Kalodata Starter is $59.90/mo
+            billed monthly. FastMoss Basic is $49/mo after a lower first month. */}
         <section className="py-16 border-y border-[#48474a]/10" style={{ backgroundColor: '#131315' }}>
           <div className="max-w-3xl mx-auto px-8">
             <div className="rounded-xl border border-[#48474a]/20 overflow-hidden">
@@ -81,7 +82,7 @@ export default function LandingPage() {
                 <div className="px-5 py-4 border-b border-[#48474a]/15 text-[#767577] font-['IBM_Plex_Mono'] text-xs uppercase tracking-wider text-right">Monthly</div>
 
                 <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">Kalodata Starter</div>
-                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-right">$45.90</div>
+                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-right">$59.90</div>
 
                 <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">FastMoss Basic</div>
                 <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-right">$49</div>
@@ -91,7 +92,7 @@ export default function LandingPage() {
               </div>
             </div>
             <p className="text-center text-[#767577] text-xs mt-4 font-['IBM_Plex_Mono']">
-              Published list prices, checked 2026-11-12. FastMoss Basic is $49/mo after a lower first month.
+              Published list prices, checked 2026-11-12. Kalodata Starter is $59.90/mo billed monthly. FastMoss Basic is $49/mo after a lower first month.
             </p>
           </div>
         </section>

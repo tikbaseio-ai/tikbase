@@ -11,6 +11,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { deriveCreatorKey } from "../shared/creator-key.js";
+import { DISCOVER_QUERIES_PER_PRODUCT } from "./call-budget.js";
+import { assertEnoughCredits } from "./credit-preflight.js";
 
 const SCRAPECREATORS_API_KEY = process.env.SCRAPECREATORS_API_KEY;
 const SUPABASE_URL =
@@ -93,7 +95,7 @@ function generateQueries(title) {
     queries.push(meaningful.slice(0, 3).join(" ") + " tiktok shop");
   }
 
-  return [...new Set(queries)].slice(0, 3);
+  return [...new Set(queries)].slice(0, DISCOVER_QUERIES_PER_PRODUCT);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,17 @@ function generateQueries(title) {
 async function main() {
   const startTime = Date.now();
   console.log(`discover-videos started at ${new Date().toISOString()}\n`);
+
+  const DISCOVER_LIMIT = Number(process.env.DISCOVER_LIMIT) || 400;
+  // Worst case is one search per generated query, and generateQueries keeps
+  // DISCOVER_QUERIES_PER_PRODUCT of them. Products with a thin title spend
+  // fewer; the preflight holds the balance against the ceiling.
+  const discoverCalls = DISCOVER_LIMIT * DISCOVER_QUERIES_PER_PRODUCT;
+  await assertEnoughCredits({
+    apiKey: SCRAPECREATORS_API_KEY,
+    need: discoverCalls,
+    plan: { total: discoverCalls },
+  });
 
   // Target the products that actually appear in the rankings users see but
   // have too few videos to estimate reliably. We read the precomputed
@@ -120,7 +133,6 @@ async function main() {
   // views and shows only the top 5, so low-view rows never surface on a
   // well-covered product; they only ever fill an otherwise-empty page.
   const MIN_VIEWS = Number(process.env.DISCOVER_MIN_VIEWS) || 1000;
-  const DISCOVER_LIMIT = Number(process.env.DISCOVER_LIMIT) || 400;
 
   // List the ranking keys first (lightweight — no payloads), then read each
   // payload individually. Fetching all payloads at once times out because each

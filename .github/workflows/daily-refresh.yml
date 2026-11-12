@@ -3,7 +3,24 @@ name: Daily TikBase Refresh
 on:
   schedule:
     - cron: "0 6 * * *" # 6:00 AM UTC daily
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      daily_call_budget:
+        description: "Cap this run's ScrapeCreators calls. Snapshots shrink to fit. Blank keeps 1,500 hot + 4,500 rotation."
+        required: false
+        default: ""
+      snapshot_hot_limit:
+        description: "Pin hot snapshots. Blank uses the default, or the budget split."
+        required: false
+        default: ""
+      snapshot_rotation_limit:
+        description: "Pin rotation snapshots. Blank uses the default, or the budget split."
+        required: false
+        default: ""
+      discover_limit:
+        description: "Products to run video discovery for. The refresh step counts this toward the credit preflight."
+        required: false
+        default: "150"
 
 jobs:
   # SPLIT INTO TWO JOBS, and the reason is arithmetic rather than taste.
@@ -28,52 +45,61 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    # Blank means "not set", which the pipeline reads as the historical
+    # default. A repository variable of the same name changes the scheduled
+    # run without a commit; a dispatch input wins over the variable.
+    env:
+      DAILY_CALL_BUDGET: ${{ github.event.inputs.daily_call_budget || vars.DAILY_CALL_BUDGET || '' }}
+      SNAPSHOT_HOT_LIMIT: ${{ github.event.inputs.snapshot_hot_limit || vars.SNAPSHOT_HOT_LIMIT || '' }}
+      SNAPSHOT_ROTATION_LIMIT: ${{ github.event.inputs.snapshot_rotation_limit || vars.SNAPSHOT_ROTATION_LIMIT || '' }}
+      DISCOVER_LIMIT: ${{ github.event.inputs.discover_limit || vars.DISCOVER_LIMIT || '150' }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
+          # v5 turns caching on when package.json has a packageManager field.
+          # This repo does not, and npm ci is the install we want either way.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
 
-      # Phase 3 snapshot budget, stated explicitly so the daily ScrapeCreators
-      # spend is visible here rather than buried in a default. HOT re-snapshots
-      # the top sellers every run; ROTATION drains the least-recently-snapshotted
-      # tail so every product is covered on a ~7.5-day cycle — inside the 4.7-10.5
-      # day span band that MAX_SPAN_RATIO=1.5 allows for the tightest (7d) window,
-      # so a product seen once per cycle can still earn a real delta.
+      # Phase 3 snapshot budget. The historical default is 1,500 hot + 4,500
+      # rotation (6,000 snapshot calls, plus phases 1/2/4 and video discovery).
+      # HOT re-snapshots the top sellers every run; ROTATION drains the
+      # least-recently-snapshotted tail so every product is covered on a
+      # ~7.5-day cycle — inside the 4.7-10.5 day span band that
+      # MAX_SPAN_RATIO=1.5 allows for the tightest (7d) window.
       #
-      # TOTAL 6,000 snapshot calls/day (~6,900 including phases 1/2/4/5), up from
-      # 3,000. Products served from rankings_cache are monitored, not fetched
-      # daily — the end-of-run membership monitor reports their snapshot ages and
-      # shouts if any passes 10.5 days. If that fires persistently, the first dial
-      # is per-niche hot coverage, then SNAPSHOT_ROTATION_LIMIT.
+      # Cut the day without a commit by setting the repository variable
+      # DAILY_CALL_BUDGET (for example 3000) or passing daily_call_budget on a
+      # manual run. Snapshots shrink to fit; the hot:rotation ratio stays.
+      # The script probes the credit balance first and exits before any data
+      # call if the key is bad or the balance is short.
       #
-      # Credits ran out entirely on 2026-07-19/20; the run now exits non-zero on
+      # Credits ran out entirely on 2026-07-19/20; the run exits non-zero on
       # any 402, so a repeat shows red instead of green.
       - name: Run daily refresh pipeline
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SNAPSHOT_HOT_LIMIT: "1500"
-          SNAPSHOT_ROTATION_LIMIT: "4500"
         run: node pipeline/tikbase-daily-refresh.js
 
-      # Deepen video coverage for under-covered ranked products. Capped at 150/day
-      # to fit the job budget; it progressively clears the backlog since covered
-      # products are skipped on subsequent runs.
+      # Deepen video coverage for under-covered ranked products. DISCOVER_LIMIT
+      # (job env, default 150) is the product cap; each product costs up to 3
+      # searches, and the refresh step's preflight already counted them.
+      # Covered products are skipped, so the backlog clears across nights.
       - name: Discover videos for top products
         env:
           SCRAPECREATORS_API_KEY: ${{ secrets.SCRAPECREATORS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          DISCOVER_LIMIT: "150"
         run: node pipeline/discover-videos.js
 
   # Precompute runs only if ingestion succeeded — ranking yesterday's data over
@@ -85,12 +111,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci

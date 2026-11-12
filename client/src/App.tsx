@@ -29,6 +29,7 @@ import SignupPage from "@/pages/signup";
 import SubscriptionSuccessPage from "@/pages/subscription-success";
 import NotFound from "@/pages/not-found";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
+import DataFreshness from "@/components/DataFreshness";
 import { getServiceState, subscribeServiceState, startServiceWatch } from "@/lib/service-health";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -89,6 +90,7 @@ function DashboardLayout() {
           </Link>
           <GlobalSearch />
         </header>
+        <DataFreshness tone="app" />
 
         <Switch>
           <Route path="/dashboard" component={() => <ProtectedRoute component={VideosPage} />} />

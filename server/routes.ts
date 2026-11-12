@@ -15,6 +15,7 @@ import brandProfileHandler from "../api/brand-profile";
 import { isUpstreamOutage, unavailable } from "../api/_lib/upstream.js";
 import productDetailHandler from "../api/product-detail";
 import videoTranscriptHandler from "../api/video-transcript";
+import dataFreshnessHandler from "../api/data-freshness";
 
 // ---- Supabase admin client (service role, server-only) ----
 let cachedAdmin: SupabaseClient | null = null;
@@ -281,6 +282,17 @@ export async function registerRoutes(
   // ---- Top videos ----
   // Reuse the exact Vercel serverless handler (api/top-videos.ts), same pattern
   // as top-products, so dev and prod share one implementation and can't drift.
+  app.get("/api/data-freshness", async (req, res) => {
+    try {
+      await dataFreshnessHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("data-freshness (proxy) error:", err?.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to read data freshness" });
+      }
+    }
+  });
+
   app.get("/api/top-videos", async (req, res) => {
     try {
       await topVideosHandler(req as any, res as any);

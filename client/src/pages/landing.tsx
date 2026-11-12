@@ -1,4 +1,5 @@
 import { Link } from 'wouter';
+import DataFreshness from '@/components/DataFreshness';
 
 function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
@@ -31,18 +32,19 @@ export default function LandingPage() {
         <section className="relative overflow-hidden px-8 pt-24 pb-12 md:pt-32 md:pb-24">
           <div className="max-w-7xl mx-auto flex flex-col items-center text-center">
             <h1 className="font-['Space_Grotesk'] text-5xl md:text-7xl font-bold tracking-tight mb-8 max-w-4xl" style={{ lineHeight: 1.05 }}>
-              Two tools. One login. Half the price.
+              TikTok Shop research, in one login.
             </h1>
-            {/* The pitch is the arithmetic. Every number here is a published
-                list price, and the two supporting claims are the two things we
-                can say without qualification: the pipeline runs nightly, and
-                the free tier really is the top 10 with no card. */}
+            {/* Published list prices, checked 2026-11-12. Kalodata Starter is
+                the US monthly price. FastMoss Basic is $49/mo after a lower
+                first month, so $49 is the price it starts at ongoing. */}
             <p className="text-[#adaaad] text-lg md:text-xl max-w-2xl mb-6 leading-relaxed" style={{ fontFamily: "'Inter', sans-serif" }}>
-              Kalodata + The Daily Virals runs about <span className="text-white font-semibold">$101/month</span> across
-              two tabs. TikBase replaces both for <span className="text-white font-semibold">$44.99</span>.
+              Kalodata Starter is <span className="text-white font-semibold">$45.90/mo</span>. FastMoss starts at <span className="text-white font-semibold">$49/mo</span>. TikBase Pro is <span className="text-white font-semibold">$44.99</span>, and the catalogue is rebuilt once a night.
             </p>
+            <div className="mb-3">
+              <DataFreshness tone="marketing" />
+            </div>
             <p className="font-['IBM_Plex_Mono'] text-sm text-[#767577] mb-12">
-              Updated daily · See today's top 10 free — no card required
+              Top 10 free — no card required
             </p>
             <div className="flex flex-col items-center gap-4">
               <Link href="/signup" className="bg-primary text-primary-foreground px-10 py-5 rounded-full font-['Space_Grotesk'] text-lg font-bold hover:brightness-110 active:scale-95 transition-all no-underline inline-block" style={{ boxShadow: '0 0 40px rgba(221,255,175,0.15)' }}>
@@ -67,34 +69,29 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* The comparison, stated as arithmetic rather than as a claim.
-            What replaced the old "Trusted by 2,000+ TikTok creators" bar and
-            its four stock-photo faces: we do not have 2,000 creators, and the
-            faces were not customers. Published list prices, checked 2026-08-15,
-            are something a reader can verify without trusting us. */}
+        {/* Entry prices, side by side. Not a sum: Kalodata and FastMoss are
+            alternatives, and adding them would describe a bill nobody pays.
+            Checked 2026-11-12. Kalodata Starter is the US monthly price.
+            FastMoss Basic is $49/mo after a lower first month. */}
         <section className="py-16 border-y border-[#48474a]/10" style={{ backgroundColor: '#131315' }}>
           <div className="max-w-3xl mx-auto px-8">
             <div className="rounded-xl border border-[#48474a]/20 overflow-hidden">
-              <div className="grid grid-cols-3 text-sm">
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#767577] font-['IBM_Plex_Mono'] text-xs uppercase tracking-wider">What you'd pay</div>
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">Today</div>
-                <div className="px-5 py-4 border-b border-[#48474a]/15 text-white font-semibold">With TikBase</div>
+              <div className="grid grid-cols-2 text-sm">
+                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#767577] font-['IBM_Plex_Mono'] text-xs uppercase tracking-wider">Entry plan</div>
+                <div className="px-5 py-4 border-b border-[#48474a]/15 text-[#767577] font-['IBM_Plex_Mono'] text-xs uppercase tracking-wider text-right">Monthly</div>
 
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">Product &amp; sales data</div>
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 font-['IBM_Plex_Mono']">Kalodata Starter $45.90</div>
-                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-primary">included</div>
+                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">Kalodata Starter</div>
+                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-right">$45.90</div>
 
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">Daily viral video picks</div>
-                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 font-['IBM_Plex_Mono']">The Daily Virals ~$55</div>
-                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-primary">included</div>
+                <div className="px-5 py-4 border-b border-r border-[#48474a]/15 text-[#adaaad]">FastMoss Basic</div>
+                <div className="px-5 py-4 border-b border-[#48474a]/15 font-['IBM_Plex_Mono'] text-right">$49</div>
 
-                <div className="px-5 py-4 border-r border-[#48474a]/15 text-white font-semibold">Monthly</div>
-                <div className="px-5 py-4 border-r border-[#48474a]/15 font-['IBM_Plex_Mono'] text-[#adaaad]">~$101 · two tabs, two logins</div>
-                <div className="px-5 py-4 font-['IBM_Plex_Mono'] text-primary font-bold">$44.99 · one</div>
+                <div className="px-5 py-4 border-r border-[#48474a]/15 text-white font-semibold">TikBase Pro</div>
+                <div className="px-5 py-4 font-['IBM_Plex_Mono'] text-primary font-bold text-right">$44.99</div>
               </div>
             </div>
             <p className="text-center text-[#767577] text-xs mt-4 font-['IBM_Plex_Mono']">
-              Competitor prices are their published list prices, checked 2026-08-15.
+              Published list prices, checked 2026-11-12. FastMoss Basic is $49/mo after a lower first month.
             </p>
           </div>
         </section>
@@ -119,7 +116,7 @@ export default function LandingPage() {
               <div className="md:col-span-1 bg-[#19191c] rounded-lg p-8 hover:bg-[#2c2c2f] transition-colors">
                 <span className="material-symbols-outlined text-primary text-3xl mb-6 block">bolt</span>
                 <h3 className="font-['Space_Grotesk'] text-xl font-bold mb-3 text-white">Refreshed Every Night</h3>
-                <p className="text-[#adaaad] text-sm leading-relaxed">Minute-by-minute updates on sales velocity.</p>
+                <p className="text-[#adaaad] text-sm leading-relaxed">Snapshots and rankings are rebuilt once a night. The pages read that cache.</p>
               </div>
               <div className="md:col-span-3 bg-[#19191c] rounded-lg p-8 hover:bg-[#2c2c2f] transition-colors flex items-center gap-8">
                 <div className="flex-shrink-0">
@@ -138,9 +135,8 @@ export default function LandingPage() {
         {/* Dashboard Preview Side-by-Side */}
         <section className="py-32 px-8" style={{ backgroundColor: '#131315' }}>
           <div className="max-w-7xl mx-auto">
-            <div className="flex flex-col md:flex-row items-end justify-between gap-8 mb-16">
+            <div className="mb-16">
               <h2 className="font-['Space_Grotesk'] text-4xl md:text-5xl font-bold max-w-xl">Built for creators who take TikTok Shop seriously</h2>
-              <span className="font-['IBM_Plex_Mono'] text-primary text-sm tracking-widest uppercase mb-2">Internal Alpha Access</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="rounded-lg overflow-hidden bg-[#19191c] shadow-xl">

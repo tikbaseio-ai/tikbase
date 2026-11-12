@@ -8,6 +8,7 @@ import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { creatorProfilePath } from '@/components/CreatorSearch';
 import { brandProfilePath } from '@/components/GlobalSearch';
 import { ScriptButton } from '@/components/ScriptPanel';
+import { ProductSalesChart } from '@/components/ProductSalesChart';
 import {
   ArrowLeft, ExternalLink, Lock, PackageSearch, AlertCircle, Play,
   Video, Users, Eye, Percent, BadgeDollarSign,
@@ -29,6 +30,16 @@ interface ProductVideoRow {
   like_count: number;
   commissioned: boolean;
   posted_at: string | null;
+}
+interface ProductCreatorRow {
+  creator_key: string;
+  author_name: string | null;
+  avatar_url: string;
+  videos: number;
+  // Omitted by the server for free callers.
+  views?: number;
+  commissioned_videos?: number;
+  last_posted_at?: string | null;
 }
 interface DetailData {
   product: {
@@ -53,6 +64,8 @@ interface DetailData {
   totals: { videos: number; creators: number; views: number };
   gmv?: { estRevenue: number; hasRealDelta: boolean; days: number };
   videos: ProductVideoRow[];
+  creators: ProductCreatorRow[] | null;
+  creatorsTotal: number;
   videosTotal: number;
   videosShown: number;
   tier: 'free' | 'paid';
@@ -276,6 +289,61 @@ export default function ProductDetailPage() {
               }
             />
           </div>
+
+          <ProductSalesChart productId={p.product_id} isPaid={isPaid} onUpgrade={() => showPaywall('product_chart')} />
+
+          {/* Who is promoting it. null = could not be read, so the block is
+              hidden rather than claiming nobody is. */}
+          {data.creators && (
+            <div className="mb-8" data-testid="product-creators">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <h2 className="text-sm font-semibold text-foreground">Top creators</h2>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {data.creators.length.toLocaleString()} of {data.creatorsTotal.toLocaleString()} shown, by views driven
+                </span>
+              </div>
+              {data.creators.length === 0 ? (
+                <div className="rounded-lg border border-border px-4 py-8 text-center text-xs text-muted-foreground">
+                  No creators with an identified profile have posted about this product yet.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border bg-card overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-[11px] text-muted-foreground">
+                        <th className="text-left py-3 px-4 font-medium">Creator</th>
+                        <th className="text-right py-3 px-4 font-medium">Videos</th>
+                        <th className="text-right py-3 px-4 font-medium">Views</th>
+                        <th className="text-right py-3 px-4 font-medium" title="Videos carrying TikTok's “Creator earns commission” label">Affiliate videos</th>
+                        <th className="hidden sm:table-cell text-right py-3 px-4 font-medium">Last posted</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {data.creators.map(c => (
+                        <tr key={c.creator_key} className="hover:bg-secondary/30 transition-colors" data-testid="product-creator-row">
+                          <td className="py-3.5 px-4">
+                            <Link href={creatorProfilePath(c.creator_key)} className="flex items-center gap-2.5 min-w-0 text-foreground hover:text-primary transition-colors">
+                              <img src={c.avatar_url} alt="" loading="lazy" className="h-8 w-8 rounded-full object-cover bg-secondary flex-shrink-0" />
+                              <span className="truncate text-[13px] font-medium">{c.author_name || c.creator_key}</span>
+                            </Link>
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono text-xs">{c.videos.toLocaleString()}</td>
+                          <td className="py-3.5 px-4 text-right font-mono text-xs">{c.views != null ? formatViews(c.views) : <Lock size={11} className="inline text-zinc-600" />}</td>
+                          <td className="py-3.5 px-4 text-right font-mono text-xs">{c.commissioned_videos != null ? c.commissioned_videos.toLocaleString() : <Lock size={11} className="inline text-zinc-600" />}</td>
+                          <td className="hidden sm:table-cell py-3.5 px-4 text-right font-mono text-xs text-muted-foreground">{c.last_posted_at !== undefined ? (daysAgo(c.last_posted_at) || '—') : <Lock size={11} className="inline text-zinc-600" />}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!isPaid && data.creatorsTotal > data.creators.length && (
+                <button onClick={() => showPaywall('product_chart')} className="mt-2 text-xs text-primary hover:underline" data-testid="upsell-product-creators">
+                  Unlock all {data.creatorsTotal.toLocaleString()} creators with views and affiliate counts
+                </button>
+              )}
+            </div>
+          )}
 
           {/* THE POINT OF THE PAGE: the videos already working for this product. */}
           <div className="flex flex-wrap items-center gap-2 mb-1">

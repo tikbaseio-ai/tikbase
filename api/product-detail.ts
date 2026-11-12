@@ -21,6 +21,11 @@ const FREE_VIDEOS = 3;
 const DEFAULT_VIDEOS = 24;
 const MAX_VIDEOS = 60;
 
+// Creators promoting the product. Free sees who they are (a name and a video
+// count is enough to understand the product's crowd); the reach numbers are Pro.
+const FREE_CREATORS = 3;
+const PAID_CREATORS = 20;
+
 function getAdminClient() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -68,6 +73,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const p = detail.product;
+
+    // Non-fatal: the page is useful without this block, and a missing RPC (the
+    // migration not applied yet) must not take the whole product page down.
+    // null means "could not read", which the client hides; [] means "none".
+    let creators: any[] | null = null;
+    {
+      const { data: cr, error: crErr } = await supabase.rpc('product_top_creators', {
+        p_product_id: id,
+        p_limit: tier === 'free' ? FREE_CREATORS : PAID_CREATORS,
+      });
+      if (crErr) console.warn('product-detail: product_top_creators failed:', crErr.message);
+      else creators = ((cr as any[]) || []).slice(0, tier === 'free' ? FREE_CREATORS : PAID_CREATORS);
+    }
     // The RPC already applied the tier's limit/offset. The slice stays as a
     // second, independent guard: if the RPC contract ever changes, free must
     // still never receive more than FREE_VIDEOS.
@@ -139,6 +157,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         commissioned: v.commissioned === true,
         posted_at: v.posted_at ?? null,
       })),
+      // Paid-only fields are omitted for free callers, not zeroed.
+      creators: creators
+        ? creators.map((c) => ({
+            creator_key: c.creator_key,
+            author_name: c.author_name ?? null,
+            avatar_url: `/api/avatar?key=${encodeURIComponent(c.creator_key)}`,
+            videos: Number(c.videos) || 0,
+            ...(tier === 'paid'
+              ? {
+                  views: Number(c.views) || 0,
+                  commissioned_videos: Number(c.commissioned) || 0,
+                  last_posted_at: c.last_posted_at ?? null,
+                }
+              : {}),
+          }))
+        : null,
+      creatorsTotal: Number(totals.creators) || 0,
       videosTotal: Number(totals.videos) || 0,
       videosShown: videos.length,
       videosPage: tier === 'free' ? 1 : page,

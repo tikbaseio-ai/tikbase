@@ -93,6 +93,8 @@ as $$
   limit greatest(1, least(p_limit, 50));
 $$;
 
+revoke execute on function product_sold_series(text[], integer) from public;
+revoke execute on function product_top_creators(text, integer)  from public;
 revoke all on function product_sold_series(text[], integer) from anon, authenticated;
 revoke all on function product_top_creators(text, integer)  from anon, authenticated;
 grant execute on function product_sold_series(text[], integer) to service_role;

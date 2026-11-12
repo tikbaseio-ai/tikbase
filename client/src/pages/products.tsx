@@ -11,7 +11,10 @@ import { formatCompactNumber, type ProductEstimates } from '@/lib/estimates';
 import { InfoTip } from '@/components/InfoTip';
 import { useBookmarks } from '@/lib/bookmarks';
 import { useSubscription } from '@/hooks/use-subscription';
-import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package, Sparkles } from 'lucide-react';
+import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, ChevronUp, ChevronDown, TrendingUp, Lock, Package, Sparkles, Download } from 'lucide-react';
+import { Sparkline } from '@/components/Sparkline';
+import { GrowthCell } from '@/components/GrowthCell';
+import { fetchTrends, TREND_RANGES, type ProductTrend, type TrendRange } from '@/lib/trends';
 import { LoadingBar } from '@/components/LoadingBar';
 import { ConfidenceDot } from '@/components/ConfidenceDot';
 import { Link } from 'wouter';
@@ -47,18 +50,48 @@ type SortDir = 'asc' | 'desc';
 const productCache = new Map<string, { data: any; timestamp: number }>();
 const PRODUCT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
+// Preset views (Pro). Drawn from the stored top-400 by 30-day revenue; the
+// server decides the order, so there is no sort or window to pass.
+type PresetId = 'high-potential' | 'rapid-growth' | 'new';
+const PRESETS: { id: PresetId; label: string; short: string }[] = [
+  { id: 'high-potential', label: 'High Potential Affiliate', short: 'High potential' },
+  { id: 'rapid-growth', label: 'Rapid Growth', short: 'Rapid growth' },
+  { id: 'new', label: 'New to TikBase', short: 'New' },
+];
+interface PresetMeta {
+  criteria: string | null;
+  pool: number;
+  evaluated: number;
+  unevaluated: number;
+}
+
 async function fetchProducts(
-  niche: string, days: number, page: number, limit: number, sort: string, dir: string
-): Promise<{ products: EnrichedProduct[]; total: number }> {
-  const cacheKey = `${niche}:${days}:${page}:${limit}:${sort}:${dir}`;
+  niche: string, days: number, page: number, limit: number, sort: string, dir: string,
+  preset: PresetId | null = null, presetRange: TrendRange = 7,
+): Promise<{ products: EnrichedProduct[]; total: number; meta: PresetMeta | null }> {
+  const cacheKey = `${niche}:${days}:${page}:${limit}:${sort}:${dir}:${preset ?? ''}:${preset ? presetRange : ''}`;
   const cached = productCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < PRODUCT_CACHE_TTL) return cached.data;
 
-  const params = new URLSearchParams({ niche, days: String(days), page: String(page), limit: String(limit), sort, dir });
-  const res = await fetch(`/api/top-products?${params}`, { headers: await authHeader() });
-  if (!res.ok) throw new Error('Failed to fetch products');
-  const data = await res.json();
-  const result = { products: data.products || [], total: data.total || 0 };
+  let data: any;
+  if (preset) {
+    const params = new URLSearchParams({ preset, niche, range: String(presetRange), page: String(page), limit: String(limit) });
+    const res = await fetch(`/api/product-views?${params}`, { headers: await authHeader() });
+    if (!res.ok) throw new Error(res.status === 404 ? 'not-ready' : 'Failed to fetch preset');
+    data = await res.json();
+  } else {
+    const params = new URLSearchParams({ niche, days: String(days), page: String(page), limit: String(limit), sort, dir });
+    const res = await fetch(`/api/top-products?${params}`, { headers: await authHeader() });
+    if (!res.ok) throw new Error('Failed to fetch products');
+    data = await res.json();
+  }
+  const result = {
+    products: data.products || [],
+    total: data.total || 0,
+    meta: preset
+      ? { criteria: data.criteria ?? null, pool: data.coverage?.pool ?? 0, evaluated: data.coverage?.evaluated ?? 0, unevaluated: data.coverage?.unevaluated ?? 0 }
+      : null,
+  };
   productCache.set(cacheKey, { data: result, timestamp: Date.now() });
   return result;
 }
@@ -120,6 +153,16 @@ export default function ProductsPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [mode, setMode] = useState<'bestsellers' | 'trending'>('bestsellers');
   const [page, setPage] = useState(1);
+  // Preset view (Pro) and the range the trend columns are measured over.
+  const [preset, setPreset] = useState<PresetId | null>(null);
+  const [presetMeta, setPresetMeta] = useState<PresetMeta | null>(null);
+  const [fetchFailed, setFetchFailed] = useState<string | null>(null);
+  const [trendRange, setTrendRange] = useState<TrendRange>(30);
+  const [trends, setTrends] = useState<Record<string, ProductTrend>>({});
+  const [trendsLoading, setTrendsLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  // Presets compare equal windows over at most 30 days (the server rejects 90).
+  const effectiveRange: TrendRange = preset && trendRange === 90 ? 30 : trendRange;
 
   // Ranking presets. Best Sellers = actual performance (revenue from real/
   // estimated units sold in the window). Trending = fastest-rising video
@@ -127,6 +170,7 @@ export default function ProductsPage() {
   // still click any column to re-sort.
   function applyMode(next: 'bestsellers' | 'trending') {
     setMode(next);
+    setPreset(null);
     setSortKey(next === 'bestsellers' ? 'estRevenue' : 'periodViews');
     setSortDir('desc');
   }
@@ -138,7 +182,7 @@ export default function ProductsPage() {
   // 7d and 30d are permanent columns. Any other selected timeframe earns an
   // extra column after 30d rather than replacing one, so switching the ranking
   // window never hides the two windows the hierarchy is built around.
-  const extraWindow = BASE_WINDOWS.includes(timeframe.days) ? null : timeframe.days;
+  const extraWindow = preset || BASE_WINDOWS.includes(timeframe.days) ? null : timeframe.days;
 
   // Free users get the real top 10 on the 1 Week window (server enforces
   // all/7d/top-10; align the UI so the active pill matches what's returned).
@@ -149,31 +193,79 @@ export default function ProductsPage() {
     }
   }, [isPaid]);
 
-  useEffect(() => { setPage(1); }, [timeframe, sortKey, sortDir]);
+  useEffect(() => { setPage(1); }, [timeframe, sortKey, sortDir, preset, trendRange]);
 
   // Fetch products from server-side endpoint
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchProducts(niche, timeframe.days, page, limit, sortKey, sortDir)
+    setFetchFailed(null);
+    fetchProducts(niche, timeframe.days, page, limit, sortKey, sortDir, preset, effectiveRange)
       .then(res => {
         if (!cancelled) {
           setPageProducts(res.products);
           setTotal(res.total);
+          setPresetMeta(res.meta);
           setLoading(false);
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
+      .catch((e: Error) => {
+        if (cancelled) return;
+        // A failed preset must not leave the previous view on screen under the
+        // new preset's name.
+        if (preset) {
+          setPageProducts([]);
+          setTotal(0);
+          setPresetMeta(null);
+          setFetchFailed(e.message === 'not-ready'
+            ? 'Rankings for this category are not ready yet. Try All, or check back after the next refresh.'
+            : 'Could not load this view. Try again in a moment.');
+        }
+        setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [niche, timeframe, page, sortKey, sortDir]);
+  }, [niche, timeframe, page, sortKey, sortDir, preset, effectiveRange]);
+
+  // Trend + growth for the rows on screen. Pro only: the server omits them for
+  // free callers, so a free user is never asked and the cells show a lock.
+  useEffect(() => {
+    if (!isPaid || pageProducts.length === 0) { setTrends({}); return; }
+    let cancelled = false;
+    setTrendsLoading(true);
+    fetchTrends(pageProducts.map(p => p.product_id), effectiveRange)
+      .then(r => { if (!cancelled) setTrends(r.trends); })
+      .catch(() => { if (!cancelled) setTrends({}); })
+      .finally(() => { if (!cancelled) setTrendsLoading(false); });
+    return () => { cancelled = true; };
+  }, [pageProducts, effectiveRange, isPaid]);
+
+  async function exportCsv() {
+    if (!isPaid) { showPaywall('export'); return; }
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ niche, days: String(timeframe.days), range: String(effectiveRange) });
+      if (preset) params.set('preset', preset);
+      const res = await fetch(`/api/export-products?${params}`, { headers: await authHeader() });
+      if (!res.ok) throw new Error('export failed');
+      const blob = await res.blob();
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'tikbase-products.csv';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setFetchFailed('Export failed. Try again in a moment.');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // Pre-fetch the OTHER timeframes for snappier tab switching — but only after
   // the current view has loaded, and sequentially, so we don't fire several
   // heavy uncached computations at once and starve the foreground request.
   useEffect(() => {
-    if (loading) return;
+    if (loading || preset) return;
     let cancelled = false;
     const others = TIMEFRAMES.filter(t => t.days !== timeframe.days);
     (async () => {
@@ -183,9 +275,10 @@ export default function ProductsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [niche, loading]);
+  }, [niche, loading, preset]);
 
   function toggleSort(key: SortKey) {
+    if (preset) return; // the preset fixes the order
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
     else { setSortKey(key); setSortDir('desc'); }
   }
@@ -211,10 +304,36 @@ export default function ProductsPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-foreground mb-1">Top Products</h1>
         <p className="text-sm text-muted-foreground">
-          {mode === 'bestsellers'
-            ? 'The best-performing products in your selected timeframe, ranked by revenue from units sold.'
-            : 'Products with the fastest-rising TikTok video attention in your selected timeframe.'}
+          {preset
+            ? 'Opportunity view over the top 400 products by 30-day revenue.'
+            : mode === 'bestsellers'
+              ? 'The best-performing products in your selected timeframe, ranked by revenue from units sold.'
+              : 'Products with the fastest-rising TikTok video attention in your selected timeframe.'}
         </p>
+      </div>
+
+      {/* Opportunity presets (Pro). Locked for free, with the paywall on click;
+          the server refuses them for free callers regardless. */}
+      <div className="flex flex-wrap items-center gap-1 bg-card rounded-lg p-1 border border-border w-fit max-w-full overflow-x-auto mb-3 [&>button]:flex-shrink-0" data-testid="preset-bar">
+        <button
+          onClick={() => setPreset(null)}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!preset ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          data-testid="preset-all"
+        >
+          All products
+        </button>
+        {PRESETS.map(pr => (
+          <button
+            key={pr.id}
+            onClick={() => { if (!isPaid) { showPaywall('presets'); return; } setPreset(pr.id); }}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${preset === pr.id ? 'bg-primary text-primary-foreground' : !isPaid ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}
+            data-testid={`preset-${pr.id}`}
+          >
+            <span className="hidden sm:inline">{pr.label}</span>
+            <span className="sm:hidden">{pr.short}</span>
+            {!isPaid && <Lock size={8} className="inline ml-1 opacity-50" />}
+          </button>
+        ))}
       </div>
 
 
@@ -263,9 +382,10 @@ export default function ProductsPage() {
               <button key={tf.label}
                 onClick={() => {
                   if (isLocked) { showPaywall('timeframe'); return; }
+                  setPreset(null); // presets are fixed to the 30-day ranking
                   setTimeframe(tf);
                 }}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${timeframe.label === tf.label ? 'bg-primary text-primary-foreground' : isLocked ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!preset && timeframe.label === tf.label ? 'bg-primary text-primary-foreground' : isLocked ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}>
                 {tf.label}
                 {isLocked && <Lock size={8} className="inline ml-1 opacity-50" />}
               </button>
@@ -273,16 +393,58 @@ export default function ProductsPage() {
           })}
         </div>
 
+        {/* Range the Trend and Growth columns are measured over: units sold in
+            the last N days against the N days before. */}
+        <div className="flex items-center gap-1 bg-card rounded-lg p-1 border border-border" data-testid="trend-range">
+          <span className="px-2 text-[11px] text-muted-foreground">Growth</span>
+          {TREND_RANGES.map(r => {
+            const off = !!preset && r === 90;
+            return (
+              <button
+                key={r}
+                disabled={off}
+                onClick={() => { if (!isPaid) { showPaywall('trends'); return; } setTrendRange(r); }}
+                title={off ? 'Presets compare up to 30 days.' : undefined}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-mono font-medium transition-colors disabled:opacity-30 disabled:pointer-events-none ${effectiveRange === r ? 'bg-primary text-primary-foreground' : !isPaid ? 'text-zinc-600' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {r}d
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          onClick={exportCsv}
+          disabled={exporting || loading}
+          className="h-9 px-3 rounded-md text-xs font-medium border border-border bg-card text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 disabled:opacity-50"
+          data-testid="export-csv"
+          title={isPaid ? 'Download this view as CSV' : 'CSV export is a Pro feature'}
+        >
+          {isPaid ? <Download size={13} /> : <Lock size={11} />}
+          {exporting ? 'Exporting...' : 'Export CSV'}
+        </button>
+
         <span className="text-xs text-muted-foreground font-mono ml-auto">
           {loading ? '...' : `${total.toLocaleString()} products`}
         </span>
       </div>
 
       {/* Info banner */}
-      <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-zinc-900/60 border border-zinc-800 text-[11px] text-zinc-400">
+      <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-zinc-900/60 border border-zinc-800 text-[11px] text-zinc-400" data-testid="view-banner">
         <TrendingUp size={13} className="text-zinc-500 flex-shrink-0" />
         <span>
-          {mode === 'bestsellers'
+          {preset && presetMeta
+            ? <>
+                {presetMeta.criteria}{' '}
+                {presetMeta.unevaluated > 0 && preset !== 'new' && (
+                  <>
+                    {presetMeta.evaluated.toLocaleString()} of {presetMeta.pool.toLocaleString()} products
+                    had enough sales history to evaluate; the other {presetMeta.unevaluated.toLocaleString()} are
+                    not shown because we cannot measure them, not because they failed.
+                  </>
+                )}
+              </>
+            : mode === 'bestsellers'
             ? 'Ranked by revenue from units sold in the selected timeframe. Rows marked “in period” use real day-over-day sales; “estimated” rows are modeled from views until more sales history accrues.'
             : 'Ranked by views from TikTok videos posted within the selected timeframe. Products with no recent video activity rank lower.'}
         </span>
@@ -290,7 +452,26 @@ export default function ProductsPage() {
 
       {loading && <LoadingBar loading={loading} />}
 
-      {!loading && total === 0 && (
+      {!loading && fetchFailed && (
+        <div className="rounded-lg border border-border px-4 py-10 text-center text-sm text-muted-foreground mb-4" data-testid="view-error">
+          {fetchFailed}
+        </div>
+      )}
+
+      {!loading && !fetchFailed && total === 0 && preset && (
+        <div className="flex flex-col items-center text-center py-20 px-6" data-testid="preset-empty">
+          <div className="w-11 h-11 rounded-full bg-secondary/60 flex items-center justify-center mb-3">
+            <Package size={20} className="text-muted-foreground" />
+          </div>
+          <p className="text-sm font-medium text-foreground mb-1">No products meet this preset today</p>
+          <p className="text-xs text-muted-foreground max-w-sm">
+            Nothing in the top 400 for this category passes the criteria above. Try All
+            categories or a different growth range.
+          </p>
+        </div>
+      )}
+
+      {!loading && !fetchFailed && total === 0 && !preset && (
         <div className="flex flex-col items-center text-center py-20 px-6">
           <div className="w-11 h-11 rounded-full bg-secondary/60 flex items-center justify-center mb-3">
             <Package size={20} className="text-muted-foreground" />
@@ -376,6 +557,11 @@ export default function ProductsPage() {
                         {product.distinct_creators == null ? '—' : product.distinct_creators.toLocaleString()}
                       </span>
                     </span>
+                    {isPaid && (
+                      <span className="text-muted-foreground inline-flex items-center gap-1">
+                        {effectiveRange}d <GrowthCell trend={trends[product.product_id]} range={effectiveRange} />
+                      </span>
+                    )}
                   </div>
                 </Link>
               );
@@ -416,6 +602,26 @@ export default function ProductsPage() {
                       tip={`Revenue from units sold in the last ${extraWindow} days — the window you have selected, which is also what the ranking uses.`}
                     />
                   )}
+                  <th className="py-3 px-3 font-medium text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1 justify-end">
+                      Growth {effectiveRange}d
+                      <InfoTip size={11}>
+                        Units sold in the last {effectiveRange} days against the {effectiveRange} days
+                        before, from our daily sales snapshots. “—” means we cannot measure it
+                        (no history, history shorter than {effectiveRange * 2} days, or under 10 units in
+                        the earlier window). It never means 0%. Pro.
+                      </InfoTip>
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 font-medium text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1 justify-end">
+                      Trend
+                      <InfoTip size={11}>
+                        Units sold per day over the last {effectiveRange} days, one point per daily
+                        snapshot. Products we snapshot less often show fewer points. Pro.
+                      </InfoTip>
+                    </div>
+                  </th>
                   <SortHeader
                     label="Total Sold"
                     sortKeyVal="total_sold"
@@ -559,6 +765,31 @@ export default function ProductsPage() {
                           <GmvCell w={product.windows?.[String(extraWindow)]} />
                         </td>
                       )}
+
+                      {/* Growth and trend. Free: a lock (the server sends none).
+                          Pro: the measured figure or an em dash, never 0%. */}
+                      <td className="py-4 px-3 text-right">
+                        {!isPaid ? (
+                          <button onClick={() => showPaywall('trends')} aria-label="Unlock growth">
+                            <Lock size={11} className="text-zinc-600" />
+                          </button>
+                        ) : trendsLoading && !trends[product.product_id] ? (
+                          <span className="text-zinc-600 text-xs font-mono">…</span>
+                        ) : (
+                          <GrowthCell trend={trends[product.product_id]} range={effectiveRange} />
+                        )}
+                      </td>
+                      <td className="py-4 px-3 text-right">
+                        {!isPaid ? (
+                          <button onClick={() => showPaywall('trends')} aria-label="Unlock trend">
+                            <Lock size={11} className="text-zinc-600" />
+                          </button>
+                        ) : trends[product.product_id] ? (
+                          <Sparkline points={trends[product.product_id].points} />
+                        ) : (
+                          <span className="text-zinc-600 text-xs font-mono">{trendsLoading ? '…' : '—'}</span>
+                        )}
+                      </td>
 
                       {/* Total sold (lifetime) */}
                       <td className="py-4 px-4 text-right">

@@ -9,6 +9,10 @@ const FEATURE_MESSAGES: Record<string, string> = {
   videos_101: 'Unlock access to all trending videos beyond the top 100',
   timeframe: "Unlock all timeframes to see what's trending this week, month, and year",
   product_detail: 'Unlock detailed product analytics and insights',
+  presets: 'Unlock opportunity views: High Potential Affiliate, Rapid Growth and New to TikBase',
+  trends: 'Unlock growth and sales-trend columns, measured from daily sales snapshots',
+  export: 'Unlock CSV export of any product view',
+  product_chart: 'Unlock the product sales chart and the full creator breakdown',
   video_detail: 'Unlock full video analytics and creator data',
   default: 'Unlock full access to TikBase analytics',
 };

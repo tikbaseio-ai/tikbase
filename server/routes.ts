@@ -14,6 +14,9 @@ import brandSearchHandler from "../api/brand-search";
 import brandProfileHandler from "../api/brand-profile";
 import { isUpstreamOutage, unavailable } from "../api/_lib/upstream.js";
 import productDetailHandler from "../api/product-detail";
+import productTrendsHandler from "../api/product-trends";
+import productViewsHandler from "../api/product-views";
+import exportProductsHandler from "../api/export-products";
 import videoTranscriptHandler from "../api/video-transcript";
 import dataFreshnessHandler from "../api/data-freshness";
 
@@ -416,6 +419,36 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("product-detail (proxy) error:", err?.message);
       if (!res.headersSent) res.status(500).json({ error: "Failed to load product" });
+    }
+  });
+
+  // ---- Sales trends / growth (Pro) ----
+  app.get("/api/product-trends", async (req, res) => {
+    try {
+      await productTrendsHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("product-trends (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load trends" });
+    }
+  });
+
+  // ---- Preset opportunity views (Pro) ----
+  app.get("/api/product-views", async (req, res) => {
+    try {
+      await productViewsHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("product-views (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to load view" });
+    }
+  });
+
+  // ---- CSV export (Pro) ----
+  app.get("/api/export-products", async (req, res) => {
+    try {
+      await exportProductsHandler(req as any, res as any);
+    } catch (err: any) {
+      console.error("export-products (proxy) error:", err?.message);
+      if (!res.headersSent) res.status(500).json({ error: "Export failed" });
     }
   });
 

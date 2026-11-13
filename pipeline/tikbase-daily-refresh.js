@@ -16,6 +16,14 @@
 import { createClient } from "@supabase/supabase-js";
 import { deriveCreatorKey } from "../shared/creator-key.js";
 import { recordDead404s, clearStrikes, STRIKES_TO_FLAG } from "./price-strikes.js";
+import {
+  resolveCallPlan,
+  formatCallPlan,
+  budgetShortfall,
+  countQueryGroups,
+  PHASE4_MAX_LOOKUPS,
+} from "./call-budget.js";
+import { assertEnoughCredits } from "./credit-preflight.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -98,15 +106,18 @@ const REGION = process.env.SCRAPECREATORS_REGION || "US";
 //   2. SNAPSHOT_ROTATION_LIMIT — shortens the cycle across the board.
 //   3. STORE_TOP_N_PRODUCTS in precompute-rankings.ts (currently 400) — shrinks
 //      the cache, and so the set being monitored, at source.
-const SNAPSHOT_HOT_LIMIT = Number(process.env.SNAPSHOT_HOT_LIMIT) || 1500;
-const SNAPSHOT_ROTATION_LIMIT = Number(process.env.SNAPSHOT_ROTATION_LIMIT) || 4500;
+// Reassigned by applyCallPlan() before any phase runs, so DAILY_CALL_BUDGET
+// can shrink these without a code change. The numbers here are the historical
+// default, used only if a phase is reached without that call.
+let SNAPSHOT_HOT_LIMIT = Number(process.env.SNAPSHOT_HOT_LIMIT) || 1500;
+let SNAPSHOT_ROTATION_LIMIT = Number(process.env.SNAPSHOT_ROTATION_LIMIT) || 4500;
 // The span ceiling the rotation cycle has to stay under: MAX_SPAN_RATIO=1.5 in
 // api/top-products.ts against the tightest (7-day) window.
 const MEMBER_AGE_SLA_DAYS = 10.5;
 const MEMBER_AGE_WARN_DAYS = 9;
 // Legacy single-cap override. Still honoured when set: it caps the COMBINED
 // tracked set, split between hot and rotation in their configured ratio.
-const SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 0;
+let SNAPSHOT_TRACKED_LIMIT = Number(process.env.SNAPSHOT_TRACKED_LIMIT) || 0;
 const SNAPSHOT_CONCURRENCY = 10;
 
 // ---------------------------------------------------------------------------
@@ -1571,7 +1582,7 @@ async function phase4() {
 
   // Fetch products missing price OR sold_count — limit to 200 per run to stay
   // within GitHub Actions timeout (one API call per product with 250ms delay).
-  const MAX_LOOKUPS = 200;
+  const MAX_LOOKUPS = PHASE4_MAX_LOOKUPS;
   const { data: products, error } = await supabase
     .from("products")
     .select("product_id, sale_price, sold_count, price_unavailable")
@@ -1739,12 +1750,76 @@ async function phase5() {
 }
 
 // ---------------------------------------------------------------------------
+// Budget + credit preflight
+// ---------------------------------------------------------------------------
+
+// Phase 1 and 2 spend one call per query. Those lists live above; the counts
+// are what the preflight holds the balance against, so they have to be the
+// lists the phases actually walk.
+function applyCallPlan() {
+  const plan = resolveCallPlan({
+    phase1Calls: countQueryGroups(KEYWORD_QUERIES),
+    phase2Calls: countQueryGroups(SHOP_SEARCH_TERMS),
+    hotRaw: process.env.SNAPSHOT_HOT_LIMIT,
+    rotationRaw: process.env.SNAPSHOT_ROTATION_LIMIT,
+    trackedRaw: process.env.SNAPSHOT_TRACKED_LIMIT,
+    budgetRaw: process.env.DAILY_CALL_BUDGET,
+    // The workflow sets this on the refresh step so the check covers the
+    // discover-videos process that runs next. A local run that does not set
+    // it is not going to launch discovery, and is not charged for it.
+    discoverLimitRaw: process.env.DISCOVER_LIMIT,
+  });
+  SNAPSHOT_HOT_LIMIT = plan.hot;
+  SNAPSHOT_ROTATION_LIMIT = plan.rotation;
+  SNAPSHOT_TRACKED_LIMIT = plan.tracked;
+  console.log("\n" + formatCallPlan(plan));
+  return plan;
+}
+
+// The site reads rankings_cache, which precompute rewrites only after this
+// process exits 0. published_at is that later step. Touching it here would
+// tell the landing page the data is new while the pages still serve the
+// previous night.
+async function recordRefreshSuccess() {
+  const refreshed_at = new Date().toISOString();
+  const { error } = await supabase.from("data_freshness").upsert(
+    { id: "daily-refresh", refreshed_at },
+    { onConflict: "id" },
+  );
+  if (error) {
+    console.error(
+      "  [WARN] could not record data_freshness: " + error.message + "\n" +
+      "  The run's data is stored, but the site cannot show when it was collected.\n" +
+      "  Apply migrations/manual/2026-11-12-data-freshness.sql",
+    );
+    return;
+  }
+  console.log(`  Recorded data_freshness.refreshed_at = ${refreshed_at}`);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
   const startTime = Date.now();
   console.log(`tikbase daily refresh started at ${new Date().toISOString()}`);
+
+  const plan = applyCallPlan();
+  const shortfall = budgetShortfall(plan);
+  if (shortfall) {
+    console.error("\n" + shortfall + "\n");
+    process.exit(1);
+  }
+  await assertEnoughCredits({
+    apiKey: SCRAPECREATORS_API_KEY,
+    need: plan.total,
+    plan,
+  });
+  if (process.argv.includes("--preflight-only")) {
+    console.log("Preflight only — no data calls were made.");
+    return;
+  }
 
   await phase1();
   await phase2();
@@ -1806,6 +1881,8 @@ async function main() {
     // no manual catch-up: topping up credits and letting the next cron fire is
     // the whole recovery procedure.
     process.exitCode = 1;
+  } else {
+    await recordRefreshSuccess();
   }
   // ---- Credit early warning -------------------------------------------
   // Reports the balance and what this run actually burned, then projects how
@@ -1850,10 +1927,25 @@ async function main() {
 // Phase 3 (optionally on the first N tracked products) for isolated testing —
 // the cron command is unchanged, so this does not affect scheduled runs.
 if (process.argv.includes("--phase3-only")) {
-  const n = process.argv.slice(2).find((a) => /^\d+$/.test(a));
-  phase3(n ? Number(n) : undefined)
-    .then(() => process.exit(stats.api_402 > 0 ? 1 : 0))
-    .catch((err) => { console.error("Fatal error:", err); process.exit(1); });
+  const nArg = process.argv.slice(2).find((a) => /^\d+$/.test(a));
+  const n = nArg ? Number(nArg) : undefined;
+  // A scoped phase-3 run does not walk phases 1, 2, 4 or discovery. Hold the
+  // balance against the snapshots it will actually fetch, not the full day.
+  (async () => {
+    const plan = applyCallPlan();
+    const need = Math.min(n ?? plan.snapshotCalls, plan.snapshotCalls);
+    await assertEnoughCredits({
+      apiKey: SCRAPECREATORS_API_KEY,
+      need,
+      plan: { total: need },
+    });
+    if (process.argv.includes("--preflight-only")) {
+      console.log("Preflight only — no data calls were made.");
+      return;
+    }
+    await phase3(n);
+    process.exit(stats.api_402 > 0 ? 1 : 0);
+  })().catch((err) => { console.error("Fatal error:", err); process.exit(1); });
 } else {
   main().catch((err) => {
     console.error("Fatal error:", err);

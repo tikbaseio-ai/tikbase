@@ -165,6 +165,45 @@ async function main() {
   console.log(
     `\nPrecompute done: ${ok} ok, ${fail} failed in ${((Date.now() - started) / 1000).toFixed(0)}s`,
   );
+
+  // A filtered or dry run did not rewrite the catalogue the site serves, so it
+  // must not move the public stamp. A partial failure didn't either. The stamp
+  // copies refreshed_at (when the collector finished) rather than "now", so a
+  // precompute that only re-sorts old snapshots does not claim they are new.
+  const fullRun = !argNiche && !argDays;
+  if (!dryRun && fail === 0 && fullRun) {
+    await publishFreshness();
+  }
+}
+
+async function publishFreshness() {
+  const { data, error } = await supabase
+    .from('data_freshness')
+    .select('refreshed_at')
+    .eq('id', 'daily-refresh')
+    .maybeSingle();
+  if (error) {
+    console.warn(
+      `  [WARN] data_freshness unreadable (${error.message}). ` +
+      `The rankings are stored; the public stamp was left alone. ` +
+      `Apply migrations/manual/2026-11-12-data-freshness.sql`,
+    );
+    return;
+  }
+  const refreshedAt = (data as { refreshed_at?: string } | null)?.refreshed_at;
+  if (!refreshedAt) {
+    console.warn('  [WARN] data_freshness has no refreshed_at; the public stamp was left alone.');
+    return;
+  }
+  const { error: upErr } = await supabase.from('data_freshness').upsert(
+    { id: 'daily-refresh', refreshed_at: refreshedAt, published_at: refreshedAt },
+    { onConflict: 'id' },
+  );
+  if (upErr) {
+    console.warn(`  [WARN] could not publish data_freshness: ${upErr.message}`);
+    return;
+  }
+  console.log(`  Published data_freshness.published_at = ${refreshedAt}`);
 }
 
 main().catch((err) => {

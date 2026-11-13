@@ -32,11 +32,13 @@ const FEATURES = [
   { name: 'Stock levels', free: false, pro: true },
 ];
 
-// Published list prices, checked 2026-08-15. The point of the row is not that
-// we are cheaper — it is that it is one login instead of two tabs.
+// Published list prices, checked 2026-11-12, logged in, US. These are
+// alternative tools, not a stack, so the table does not add them. Kalodata
+// Starter is $59.90/mo billed monthly ($49.92/mo yearly); the row is the
+// monthly list price. FastMoss Basic is $49/mo after a lower first month.
 const COMPARISON = [
-  { what: 'Product & sales data', them: 'Kalodata Starter', price: '$45.90/mo' },
-  { what: 'Daily viral video picks', them: 'The Daily Virals', price: '~$55/mo' },
+  { what: 'Product and sales data', them: 'Kalodata Starter', price: '$59.90/mo' },
+  { what: 'Product and sales data', them: 'FastMoss Basic', price: '$49/mo' },
 ];
 
 export default function PlansPage() {
@@ -265,9 +267,9 @@ export default function PlansPage() {
       {/* The comparison, on the page where the decision gets made. */}
       <div className="mt-10 rounded-lg border border-border overflow-hidden max-w-3xl mx-auto" data-testid="price-comparison">
         <div className="px-5 py-3 border-b border-border bg-card/50">
-          <p className="text-sm font-semibold text-foreground">What TikBase replaces</p>
+          <p className="text-sm font-semibold text-foreground">What the other tools charge to start</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Two subscriptions, two tabs, two logins — or one.
+            Kalodata and FastMoss are alternatives. The prices are not a combined bill.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -280,11 +282,6 @@ export default function PlansPage() {
                   <td className="py-3 pr-5 text-right font-mono text-foreground whitespace-nowrap">{c.price}</td>
                 </tr>
               ))}
-              <tr className="border-b border-border/60">
-                <td className="py-3 pl-5 pr-3 font-semibold text-foreground whitespace-nowrap">Their total</td>
-                <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">two tabs, two logins</td>
-                <td className="py-3 pr-5 text-right font-mono font-semibold text-foreground whitespace-nowrap">~$101/mo</td>
-              </tr>
               <tr>
                 <td className="py-3 pl-5 pr-3 font-semibold text-foreground whitespace-nowrap">TikBase Pro</td>
                 <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">one login</td>
@@ -294,7 +291,7 @@ export default function PlansPage() {
           </table>
         </div>
         <p className="px-5 py-3 text-[11px] text-muted-foreground border-t border-border">
-          Competitor prices are their published list prices, checked 2026-08-15.
+          Published list prices, checked 2026-11-12. Kalodata Starter is $59.90/mo billed monthly. FastMoss Basic is $49/mo after a lower first month.
         </p>
       </div>
 

@@ -32,6 +32,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import SubscriptionSuccessPage from "@/pages/subscription-success";
 import NotFound from "@/pages/not-found";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
+import DataFreshness from "@/components/DataFreshness";
 import { getServiceState, subscribeServiceState, startServiceWatch } from "@/lib/service-health";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -92,6 +93,7 @@ function DashboardLayout() {
           </Link>
           <GlobalSearch />
         </header>
+        <DataFreshness tone="app" />
 
         {/* Routes take the page as a CHILD, not as `component={() => ...}`.
             The inline arrow was a new component type on every render of this
